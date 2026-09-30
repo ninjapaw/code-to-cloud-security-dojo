@@ -1,0 +1,410 @@
+# Code to Cloud Security Dojo
+
+> **Authorized training only.** WebGoat is deliberately vulnerable. Use a dedicated
+> training subscription, never production data or credentials. Keep WebGoat private
+> and remove the lab when finished. This is an independent community project, not
+> a Microsoft or OWASP product, endorsement or security assurance.
+
+A lifecycle wizard and separate admin portal follow pinned WebGoat
+source through scanning, ACR, a private App Service runtime, Defender observations,
+bounded test requests and executive evidence reports.
+
+**Status:** experimental training software, not production security infrastructure.
+Local tests and image builds do not establish live Azure readiness or protection.
+Validate deployment, access controls, rotation and detections on a disposable target.
+
+## Contents
+
+- [Start locally](#start-locally)
+- [Architecture](#architecture)
+- [Source and image lifecycle](apps/dojo/README.md)
+- [Defender and code-to-cloud story](#defender-and-code-to-cloud-story)
+- [Deployment and operation](#deployment-and-operation)
+- [Security](#security)
+- [Troubleshooting](#troubleshooting)
+- [Validation and live acceptance](#validation)
+- [Official references](#official-references)
+
+## Start Locally
+
+Requires Node.js 22+ and npm. From the repository root:
+
+```text
+npm ci
+npm test
+npm run plan
+npm run preview
+```
+
+Open <http://127.0.0.1:4397>. Preview binds only to loopback, has no credentials,
+makes no Azure calls and cannot execute tests. It is not a simulated success report.
+
+For Azure setup, follow [Deployment and operation](#deployment-and-operation).
+Resource provisioning and paid Defender changes require separate cost approval.
+
+## Architecture
+
+The `dojo` workload uses a pinned WebGoat source snapshot. The Node/Express
+`control-portal` is a separate application, identity and trust boundary.
+[Foundation IaC](infra/foundation.bicep) creates dependencies before
+[release IaC](infra/main.bicep) selects reviewed image digests.
+
+- Two Linux App Service plans (default B2), one Basic ACR and two pull identities.
+- Private Dojo workload endpoint with public access disabled. WebWolf is not exposed.
+- Portal VNet integration and a single authorized public IPv4 `/32` restriction.
+- Key Vault with RBAC, purge protection, private endpoint and operator-IP firewall.
+- Random admin password and session signing key generated directly into Key Vault
+  through the SDK. No secret arguments, committed credentials or local secret files.
+- Versionless Key Vault references for the portal; managed identity for Azure/Blob
+  access. WebGoat receives neither portal credentials nor evidence permissions.
+- Private-endpoint Blob evidence store with shared-key and public blob access off;
+  operator-IP access supports collection. Log Analytics receives app diagnostics.
+- Portal resource-group Reader and subscription Security Reader, no deployment or
+  Defender-write privileges. Review that subscription-wide read scope explicitly.
+
+The training portal uses one administrator credential, not an enterprise SSO/MFA
+system. It adds Secure/HttpOnly/SameSite cookies, signed revocable one-hour sessions,
+same-origin CSRF checks, login limits, a cross-instance test lease and cooldown.
+Do not repurpose it as a production control plane.
+
+## Defender and Code-to-Cloud Story
+
+The desired configuration enables paid Defender CSPM (`CloudPosture`), Containers,
+App Service and Key Vault protection. It requests `AgentlessServerlessPosture` and
+`ContainerRegistriesVulnerabilityAssessments`. Reconciliation preserves unrelated
+extensions and refuses an existing paid subplan conflict; it does not turn other
+workload protections off. API availability, permissions and policies are checked
+through actual requests and readback, not assumed from a deployment success.
+
+The [workflow](.github/workflows/dojo.yml) runs tests, compiles IaC, scans source
+with Microsoft Security DevOps, builds and scans both images, and retains evidence.
+It has **no Azure deployment credentials or write operations**. Operator releases
+use the wizard. WebGoat vulnerabilities are intentional and require review; high
+or critical portal image vulnerabilities fail the release build.
+
+Defender GitHub consent, repository discovery, native GitHub security features and
+agentless scanner eligibility are separate prerequisites. Connect this repository
+and verify discovery of its imported Maven/Java source. Scanner exclusions for
+vendored code and Java analysis support must be checked independently of Maven
+dependency analysis. See [GitHub setup and coverage](#connect-github-and-verify-coverage).
+
+App Service is not AKS. No pod sensor, Kubernetes attack-path or guaranteed
+repo-to-runtime edge is claimed. Private Dojo workload is ineligible for serverless
+vulnerability assessment; use ACR assessment. `ServerlessContainers` is not enabled
+for this App Service architecture. Alerts and attack paths may legitimately be absent.
+
+## Deployment and Operation
+
+Use `npm run wizard` or `node scripts/deploy.mjs <action>`. Add `--audit` to any
+lifecycle action for an offline, no-write plan. Azure mutations require exact
+action/subscription/group approval; release and cleanup also bind approval to
+their evidence hashes. No environment is inferred from a Git branch.
+
+### Configure the Training Scope
+
+Install Node.js 22+, npm, Git, Azure CLI with Bicep, Docker and Trivy. The release
+build compiles Java 25/Maven inside Docker; local Java is not required. Ensure
+Docker is running and review regional SKU availability, quotas and policies first.
+
+```text
+npm ci
+npm run wizard
+```
+
+Choose `configure`. Select the subscription by name, ID and tenant; enter the
+dedicated resource group, stable lab ID, Azure region, operator's **Entra object ID**
+and current authorized public IPv4 `/32`. Subsequent commands use the ignored
+local configuration. `DOJO_CONFIG` can select another private configuration.
+Never put passwords, tokens or real training accounts in committed configuration.
+
+The bootstrap operator needs resource creation and role-assignment rights at the
+lab group, subscription role-assignment rights for portal Security Reader, and
+Security Admin or equivalent rights for the separately approved Defender pricing
+operation. The default principal type is a human User. Do not substitute a client
+ID for an object ID or run bootstrap as an unreviewed CI identity. The applications
+must not receive bootstrap or Defender-write permissions.
+
+```text
+npm run plan
+node scripts/deploy.mjs doctor
+```
+
+`plan` is offline. `doctor` reads context, ownership, tools, providers and plan
+state, rejecting wrong cloud/tenant/subscription or missing build tools. It does
+not prove RBAC sufficiency, quota, policy compatibility or private connectivity;
+those require live preflight/what-if and acceptance checks. No command silently
+switches tenants or changes the CLI's global subscription selection.
+
+### Provision and Enable Protection
+
+Use the wizard's `provision` action, review the target and recurring charges, then
+provide the exact action/subscription/group confirmation and cost consent:
+
+```text
+node scripts/deploy.mjs provision --confirm "provision:<subscription-id>:<resource-group>" --accept-costs
+```
+
+This registers required resource providers, creates an ownership-tagged group if
+absent, previews and deploys the foundation, grants scoped data roles plus portal
+subscription Security Reader, and creates missing admin/session secrets directly
+in Key Vault. Existing valid secrets are preserved. An existing untagged group is
+not adopted. RBAC propagation can delay secret creation; rerun after propagation.
+
+No application image is selected in this stage. Two hosting plans, ACR, private
+endpoints, logs, storage and Key Vault incur charges even before release. Review
+current pricing for the chosen subscription/region; this project does not provide
+a verified cost estimate.
+
+Review `doctor` and the subscription's current settings before separately approving
+paid protection:
+
+```text
+node scripts/deploy.mjs protection --confirm "protection:<subscription-id>:<resource-group>" --accept-costs
+```
+
+This change is **subscription-wide**, including other eligible workloads. A
+non-secret before-snapshot is saved in ignored output. Reconciliation preserves
+unrelated extensions and their properties, refuses conflicting paid subplans,
+and independently rereads changes. Failed extension operation status is not healthy
+coverage even when `isEnabled` is true. An API or policy failure must be investigated,
+not bypassed. Ordinary cleanup never downgrades subscription plans or disables
+other workloads' VM, Kubernetes or sensitive-data protections.
+
+### Connect GitHub and Verify Coverage
+
+An authorized organization owner/subscription administrator must complete
+[GitHub connector onboarding](https://learn.microsoft.com/azure/defender-for-cloud/quickstart-onboard-github).
+Select only this repository and any separately authorized source fork needed for
+the exercise. Reuse a matching authorized connector where appropriate. Consent is
+interactive; a connector resource alone does not establish consent, health or
+repository discovery. Verify those after ingestion.
+
+Enable GitHub dependency graph, Dependabot alerts, code scanning and secret scanning
+where supported, permitted and licensed. GitHub-native alerts, pipeline SARIF and
+Defender findings are distinct evidence sources. The workflow retains SARIF as
+artifacts; it does not automatically upload it as native GitHub code-scanning alerts.
+
+[Agentless code scanning](https://learn.microsoft.com/azure/defender-for-cloud/agentless-code-scanning)
+evaluates supported connected repositories/default branches independently of CI.
+Confirm current [support](https://learn.microsoft.com/azure/defender-for-cloud/devops-support),
+particularly Java source analysis versus Maven dependency analysis. This repository
+contains the pinned source and Maven manifest under `apps/dojo/upstream`; verify
+scanner scope and exclusions include that directory. The portal deliberately keeps
+connector/native coverage unknown when it cannot independently verify it.
+
+CI does not deploy and needs no Azure OIDC trust. Any future automated deployment
+must use scoped OIDC with verified claims and approval of the scanned artifact.
+
+### Build, Review and Release
+
+The [source lifecycle](apps/dojo/README.md) documents the imported source, licenses,
+upstream refresh and integrity checks. Review the full source commit before syncing:
+
+```text
+npm run source:upstream
+npm run source:sync
+npm run source:check
+npm run image:build
+```
+
+Commit the reviewed source snapshot, lock and configuration pin together before
+creating a release. The tool never creates commits. Local `image:build` does not
+scan or publish; the environment `build` action performs the release pipeline:
+
+```text
+node scripts/deploy.mjs build --confirm "build:<subscription-id>:<resource-group>"
+```
+
+It verifies the imported snapshot, compiles its JAR in Java 25, retains the upstream
+runtime recipe, builds the separate portal, and scans both images with Trivy before
+pushing either. Portal HIGH/CRITICAL findings fail the build. Intentional Dojo
+findings still require review and must be distinguished from scanner failures.
+Source labels, tree/content hashes and scan hashes accompany immutable ACR digests
+in the ignored release manifest. A changed configuration invalidates that manifest.
+
+```text
+node scripts/deploy.mjs what-if
+node scripts/deploy.mjs deploy
+```
+
+An unconfirmed deploy prints the exact required token and exits without deployment.
+Review both scans and what-if before approving the exact release:
+
+```text
+node scripts/deploy.mjs deploy --confirm "deploy:<release-hash>:<subscription-id>:<resource-group>"
+```
+
+The script verifies scan hashes and registry digests, requires configured Defender
+readback, checks credentials, then applies the image-release template. A failed
+build never changes the running app. `repair` reapplies the reviewed release; it
+does not rebuild, rotate all credentials or weaken protection. Retain the previous
+manifest and scans for rollback. `--release <manifest-path>` selects a reviewed
+prior manifest with its original source/configuration binding. Do not commit
+sensitive release records or confuse a restart/digest with verified HTTP health.
+
+### Sign In and Walk Through the Story
+
+Open the printed portal URL from the configured admin IP. Retrieve `admin-password`
+directly through an authorized Key Vault session, then sign in as `admin`. Never
+send credentials through chat, command-line arguments, reports or browser JavaScript.
+Sessions last one hour; logout revokes the stored session.
+
+Follow Source, Build & Assess, Cloud Posture, Runtime Validation, Remediate & Compare,
+and Report & Retire. Refresh collects actual configuration and evidence. API errors,
+permission failures, incomplete queries, missing assessments and pending scans must
+not be converted into passing results. A configured control is not a demonstrated
+detection. Subscription Security Reader is read-only but broad; review its boundary.
+
+The Dojo workload is private and is not reverse-proxied into the portal. Interactive
+WebGoat lessons need a separately approved private network route and DNS access to
+the VNet, such as an existing training VPN. A portal link is not a network tunnel.
+The fixed test runner uses private connectivity. WebWolf on port 9090 is not exposed;
+use upstream localhost instructions for dependent lessons. Never weaken isolation
+to make an exercise or attack-path finding appear.
+
+### Run Tests and Compare Evidence
+
+Admin tests require authentication, same-origin/CSRF checks and explicit consent.
+The server selects a fixed deployment target and request, records evidence before
+sending, uses HTTPS/timeouts and refuses redirects. Blob leases serialize tests
+across instances with a 60-second cooldown. Failed evidence writes stop the request.
+There are no arbitrary URLs, payloads, commands, external targets, metadata probes
+or network-wide scans. The SQL-shaped input probe is not a successful exploit or
+authenticated WebGoat lesson.
+
+Microsoft's App Service validation suffix is `/This_Will_Generate_ASC_Alert`.
+New sites may require 24 hours for registration, with alerts taking approximately
+2-4 hours. Follow the [validation procedure](https://learn.microsoft.com/azure/defender-for-cloud/alert-validation)
+and check hosting eligibility first. Those timings are not guarantees.
+Microsoft-generated sample alerts use simulated resources and cannot be presented
+as detections of this lab.
+
+Reports filter alerts to the exact resource and use activity time for per-run
+candidates. Keep these outcomes distinct: request executed/rejected/failed; alert
+matched by resource/time only; matching run-specific evidence where actually
+available; no alert observed yet; and API unavailable or scan pending. The current
+candidate matching does not establish causation. An alert does not prove prevention,
+and a successful request does not prove detection.
+
+For remediation, pin a reviewed fix, rebuild, rescan and approve the new digest.
+Wait for actual reassessment before comparing same-scope JSON snapshots. Count or
+revision differences alone do not prove remediation. Export HTML for browser PDF
+printing and JSON for archival; retain failed/incomplete reports and the full Blob
+audit history, not just the latest 100 runs displayed in the portal.
+
+The private workload is ineligible for current serverless vulnerability assessment;
+use ACR image assessment without making it public. Other posture/App Service
+capabilities require independent checks. No Kubernetes sensor, generated attack path
+or complete source-to-App-Service runtime mapping is guaranteed by image labels.
+
+### Rotate Credentials and Clean Up
+
+Credentials expire after 90 days. Rotate before expiry:
+
+```text
+node scripts/deploy.mjs rotate --confirm "rotate:<subscription-id>:<resource-group>"
+node scripts/deploy.mjs verify
+node scripts/deploy.mjs report
+```
+
+Rotation creates new Key Vault versions, requests reference refresh and restarts
+the portal. Verify the new credential and rejection of old sessions before sharing
+access. This is an explicit operator workflow, not unattended rotation, and its
+live behavior remains unverified.
+
+Export required HTML/JSON reports and Blob run/audit records before deletion.
+These can contain subscription IDs and security findings; protect and redact them
+before external sharing. Review the whole dedicated group, including its ACR images:
+
+```text
+node scripts/deploy.mjs inventory
+node scripts/deploy.mjs deprovision --confirm "deprovision:<inventory-hash>:<subscription-id>:<resource-group>" --evidence-exported
+```
+
+Changed inventory invalidates the approval hash. Deletion rereads ownership and
+removes the group plus the matching owned portal subscription reader assignment.
+Never place unrelated resources in this group.
+
+Subscription Defender plans and GitHub consent are retained. Purge-protected vaults
+retain deleted credentials for at least seven days and may block immediate name
+reuse. Recovery or a reviewed new lab ID is an explicit decision; the wizard does
+not purge vaults or disable other workloads' protection. Verify resource absence,
+retained permissions/services and continuing charges afterward.
+
+## Troubleshooting
+
+- **403:** check the public admin IP, private DNS/endpoints and RBAC propagation.
+  Do not disable the firewall or publicize the workload as a workaround.
+- **Unresolved Key Vault reference:** check the portal identity's Secrets User role,
+  enabled/unexpired secrets, private DNS and VNet routing. Startup fails closed.
+- **Unknown report checks:** inspect Reader/Security Reader permissions, API
+  availability and ingestion. Errors are deliberately not converted into zero findings.
+- **Missing Trivy:** install it before release builds; there is no skip-scan release path.
+- **Provider, SKU or policy failure:** review the error against the approved target.
+  Scripts must not silently change regions, subscriptions or security settings.
+
+## Security
+
+Read [SECURITY.md](SECURITY.md) before deploying or reporting a vulnerability.
+Never publish credentials, environment-specific configuration, exports, build
+receipts, screenshots with identifiers or Azure state. Ignored files are not a
+substitute for reviewing what Git will publish; already tracked files remain tracked.
+
+```text
+npm run check:public
+npm audit --omit=dev
+```
+
+The publication guard checks tracked/non-ignored files, public defaults and source
+integrity without printing matched values. Its sole reviewed upstream marker
+exception is tied to an exact file hash. It is not exhaustive secret detection and
+does not scan remote history or unpack archives. Enable GitHub secret scanning and
+push protection where available; use a dedicated history scan before publication.
+
+The imported WebGoat source intentionally contains vulnerable examples and public
+training fixtures. Do not reuse them as real credentials or disable scanning of
+the control portal. Preserve upstream licenses and explanatory training comments;
+the workload and portal must remain separate. Private ingress and RBAC do not prove
+complete outbound containment, and the shared admin login does not provide SSO/MFA
+or individual operator accountability.
+
+## Validation
+
+```text
+npm test
+npm run check:public
+npm run test:browser
+```
+
+Browser tests use installed Edge on Windows; elsewhere install Chromium with
+`npx playwright install --with-deps chromium`. Screenshots go to ignored output.
+Run Bicep compilation on the three root templates, ShellCheck on both wrappers,
+and Actionlint on the workflow. A full release also requires Docker/Trivy and an
+approved disposable Azure target. Local tests are not a substitute for that gate.
+
+`verify` and `report` return exit code 2 when collected checks contain gaps or
+unknowns, including connector coverage that this collector cannot independently
+verify. Exported reports are still available; do not treat that exit code as proof
+that every deployed service failed.
+
+Before a live workshop, run provision/protection/release twice on an approved
+disposable target and confirm no unwanted second-run changes. Verify deterministic
+roles, actual image startup, Key Vault references, login/logout/rotation, private
+test connectivity, unauthorized access denial and plan/extension readback. Run only
+an explicitly authorized bounded test, export its actual evidence, then prove
+cleanup and identify retained subscription-wide costs and permissions. Compilation
+and mocked tests do not establish these live results.
+
+## Official References
+
+- [Defender pricing](https://azure.microsoft.com/pricing/details/defender-for-cloud/)
+- [Defender App Service alert validation](https://learn.microsoft.com/azure/defender-for-cloud/alert-validation)
+- [App Service alert reference](https://learn.microsoft.com/azure/defender-for-cloud/alerts-azure-app-service)
+- [Serverless protection eligibility](https://learn.microsoft.com/azure/defender-for-cloud/serverless-protection)
+- [Serverless container posture and supported services](https://learn.microsoft.com/azure/defender-for-cloud/posture-for-serverless-containers)
+- [Defender for Containers enablement](https://learn.microsoft.com/azure/defender-for-cloud/defender-for-containers-enable-plan)
+- [ACR vulnerability assessment](https://learn.microsoft.com/azure/defender-for-cloud/agentless-vulnerability-assessment-azure)
+- [GitHub connector and consent](https://learn.microsoft.com/azure/defender-for-cloud/quickstart-onboard-github)
+- [DevOps support matrix](https://learn.microsoft.com/azure/defender-for-cloud/devops-support)
+- [Agentless code scanning](https://learn.microsoft.com/azure/defender-for-cloud/agentless-code-scanning)
+- [Container code-to-runtime mapping](https://learn.microsoft.com/azure/defender-for-cloud/container-image-mapping)

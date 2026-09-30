@@ -1,0 +1,35 @@
+== What's an HTTP Proxy
+
+A proxy is some forwarder application that connects your HTTP client to backend resources.
+HTTP clients can be browsers or applications like curl, SOAP UI, Postman, etc.
+Usually, these proxies are used for routing and getting internet access when there is no direct connection to the internet from the client itself.
+HTTP proxies are therefore also ideal when you are testing your application.
+You can always use the proxy log records to see what was actually sent from client to server.
+So you can check the request and response headers and the XML, JSON, or other payloads.
+
+HTTP Proxies receive requests from a client and relay them.
+They also typically record them.
+They act as a man-in-the-middle.
+It even works fine with or without HTTPS as long as your client or browser trusts the certificate of the HTTP Proxy.
+
+{nbsp} +
+
+=== HTTP Proxy Examples
+There are two major HTTP Proxy tools, https://portswigger.net/burp[Burp Suite] and the https://www.zaproxy.org/[Zed Attack Proxy]. Complete the subsequent lessons to learn more about each.
+
+
+{nbsp} +
+
+=== Next pages
+
+You can go through all lesson pages or click on these links to skip some pages.
+
+==== ZAP
+* link:start.mvc#lesson/HttpProxies.lesson/1[ZAP Basics]
+* link:start.mvc#lesson/HttpProxies.lesson/2[ZAP Interception]
+* link:start.mvc#lesson/HttpProxies.lesson/3[Additional ZAP Tools]
+
+==== Burp Suite
+* link:start.mvc#lesson/HttpProxies.lesson/4[Burp Suite Basics]
+* link:start.mvc#lesson/HttpProxies.lesson/5[Burp Suite Interception]
+* link:start.mvc#lesson/HttpProxies.lesson/6[Additional Burp Suite Tools]

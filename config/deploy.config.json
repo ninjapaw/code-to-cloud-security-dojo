@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "labId": "code-to-cloud-training",
+  "tenantId": "",
+  "subscriptionId": "",
+  "resourceGroup": "code-to-cloud-training",
+  "location": "centralus",
+  "adminCidr": "",
+  "operatorObjectId": "",
+  "appServiceSku": "B2",
+  "source": {
+    "repository": "https://github.com/WebGoat/WebGoat.git",
+    "revision": "872d6149d4ef29e4929c2f4eda279f7fbedc52e8"
+  },
+  "protection": {
+    "CloudPosture": {
+      "pricingTier": "Standard",
+      "extensions": [
+        { "name": "AgentlessServerlessPosture", "isEnabled": "True" }
+      ]
+    },
+    "Containers": {
+      "pricingTier": "Standard",
+      "extensions": [
+        {
+          "name": "ContainerRegistriesVulnerabilityAssessments",
+          "isEnabled": "True"
+        }
+      ]
+    },
+    "AppServices": { "pricingTier": "Standard" },
+    "KeyVaults": { "pricingTier": "Standard", "subPlan": "PerKeyVault" }
+  }
+}

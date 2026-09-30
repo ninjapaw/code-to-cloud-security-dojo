@@ -1,0 +1,7 @@
+== What is a Gadget Chain?
+
+It is rare, but possible to find a gadget that performs a dangerous action immediately when deserialized. It is
+much more likely that researchers discover gadgets that require pairing with one or more additional gadgets in order to
+perform a malicious action. This sequence of interconnected gadgets that ultimately leads to a dangerous outcome is known as a gadget chain.
+
+Identifying gadgets and assembling gadget chains is an active area of research in software security. It typically requires extensive time spent reading and analyzing code.

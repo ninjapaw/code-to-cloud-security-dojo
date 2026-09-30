@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex,nofollow" />
+    <title>Code to Cloud Security Dojo</title>
+    <link rel="stylesheet" href="/style.css" />
+    <script src="/icons.js" defer></script>
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <a href="#overview" class="brand"
+        ><i data-lucide="shield-check"></i
+        ><span>Code to Cloud Security Dojo</span></a
+      ><span class="top-label">Training</span>
+      <div class="top-actions">
+        <span id="identity">Not signed in</span
+        ><button
+          id="theme"
+          class="icon"
+          title="Toggle color theme"
+          aria-label="Toggle color theme"
+        >
+          <i data-lucide="sun-moon"></i></button
+        ><button
+          id="logout"
+          class="icon"
+          title="Sign out"
+          aria-label="Sign out"
+          hidden
+        >
+          <i data-lucide="log-out"></i>
+        </button>
+      </div>
+    </header>
+    <div id="notice" role="status" class="notice" hidden></div>
+    <div class="shell">
+      <nav aria-label="Workspace">
+        <p class="nav-label">TRAINING WORKSPACE</p>
+        <a href="#overview" data-view="overview"
+          ><i data-lucide="layout-dashboard"></i>Overview</a
+        ><a href="#story" data-view="story"
+          ><i data-lucide="route"></i>Code-to-cloud story</a
+        ><a href="#findings" data-view="findings"
+          ><i data-lucide="scan-search"></i>Findings & alerts</a
+        ><a href="#lab" data-view="lab"
+          ><i data-lucide="flask-conical"></i>Admin lab</a
+        ><a href="#status" data-view="status"
+          ><i data-lucide="activity"></i>Deployment status</a
+        ><a href="#reports" data-view="reports"
+          ><i data-lucide="file-chart-column"></i>Executive reports</a
+        >
+        <div class="nav-footer">
+          <i data-lucide="lock-keyhole"></i
+          ><span>Isolated training<br />Evidence, not assurance</span>
+        </div>
+      </nav>
+      <main>
+        <section id="login" hidden>
+          <p class="eyebrow">ADMIN ACCESS</p>
+          <h1>Code to Cloud Security Dojo</h1>
+          <form id="login-form" class="login-form">
+            <label
+              >Username<input
+                name="username"
+                value="admin"
+                autocomplete="username"
+                required /></label
+            ><label
+              >Password<input
+                name="password"
+                type="password"
+                autocomplete="current-password"
+                required
+                maxlength="256" /></label
+            ><button type="submit"><i data-lucide="log-in"></i>Sign in</button>
+            <p id="login-error" role="alert"></p>
+          </form>
+        </section>
+        <div id="workspace" hidden>
+          <div class="page-heading">
+            <div>
+              <p class="eyebrow">DEFENDER FOR CLOUD / TRAINING</p>
+              <h1 id="page-title">Code to Cloud Security Dojo</h1>
+              <p id="scope" class="muted"></p>
+            </div>
+            <button
+              id="refresh"
+              class="secondary"
+              title="Refresh observed evidence"
+            >
+              <i data-lucide="refresh-cw"></i>Refresh
+            </button>
+          </div>
+          <p id="error" class="error" role="alert" hidden></p>
+          <section data-panel="overview">
+            <div class="outcome">
+              <i data-lucide="circle-alert"></i>
+              <div>
+                <h2 id="outcome-title">Not live-verified</h2>
+                <p id="outcome-detail">No collection has been performed.</p>
+              </div>
+              <span id="collected" class="badge">NOT COLLECTED</span>
+            </div>
+            <div id="metrics" class="metrics"></div>
+            <section class="section">
+              <div class="section-heading">
+                <h2>Source to runtime</h2>
+                <a href="#story"
+                  >Open walkthrough <span aria-hidden="true">&rarr;</span></a
+                >
+              </div>
+              <div class="pipeline">
+                <div>
+                  <i data-lucide="git-commit-horizontal"></i
+                  ><strong>Pinned source</strong><span>Java / Dojo</span>
+                </div>
+                <div>
+                  <i data-lucide="container"></i><strong>Scanned image</strong
+                  ><span>ACR / immutable digest</span>
+                </div>
+                <div>
+                  <i data-lucide="network"></i><strong>Private runtime</strong
+                  ><span>App Service / VNet</span>
+                </div>
+                <div>
+                  <i data-lucide="shield-check"></i
+                  ><strong>Observed evidence</strong
+                  ><span>Defender / reports</span>
+                </div>
+              </div>
+            </section>
+            <section class="section">
+              <div class="section-heading">
+                <h2>Control coverage</h2>
+                <span class="muted">Readback, not assumptions</span>
+              </div>
+              <div id="coverage"></div>
+            </section>
+          </section>
+          <section data-panel="story" hidden>
+            <div
+              id="story-steps"
+              class="story-tabs"
+              role="tablist"
+              aria-label="Story stages"
+            ></div>
+            <article class="story-detail">
+              <p id="story-number" class="eyebrow"></p>
+              <h2 id="story-title"></h2>
+              <p id="story-text"></p>
+              <div id="story-evidence"></div>
+              <div class="actions">
+                <button id="previous" class="secondary">
+                  <i data-lucide="arrow-left"></i>Previous</button
+                ><button id="next">
+                  Next<i data-lucide="arrow-right"></i>
+                </button>
+              </div>
+            </article>
+          </section>
+          <section data-panel="findings" hidden>
+            <div class="section-heading">
+              <h2>Security assessments</h2>
+              <label class="compact"
+                >Status<select id="finding-filter">
+                  <option value="all">All states</option>
+                  <option>Unhealthy</option>
+                  <option>Healthy</option>
+                  <option>NotApplicable</option>
+                </select></label
+              >
+            </div>
+            <div id="findings"></div>
+            <section class="section">
+              <h2>Target-scoped alerts</h2>
+              <div id="alerts"></div>
+            </section>
+          </section>
+          <section data-panel="lab" hidden>
+            <div class="lab-warning">
+              <i data-lucide="triangle-alert"></i>
+              <p>
+                Authorized training only. Requests are restricted to the
+                configured private Dojo host. An HTTP response is not proof of
+                exploitation, detection or prevention.
+              </p>
+            </div>
+            <div id="tests" class="test-list"></div>
+            <section class="section">
+              <h2>Run evidence</h2>
+              <div id="runs"></div>
+            </section>
+          </section>
+          <section data-panel="status" hidden>
+            <h2>Environment binding</h2>
+            <dl id="binding"></dl>
+            <section class="section">
+              <h2>Provisioned resources</h2>
+              <div id="resources"></div>
+            </section>
+            <section class="section">
+              <h2>Coverage limitations</h2>
+              <ul id="limitations"></ul>
+            </section>
+          </section>
+          <section data-panel="reports" hidden>
+            <h2>Executive evidence report</h2>
+            <div class="report-summary">
+              <i data-lucide="file-chart-column"></i>
+              <div>
+                <h3>Code to Cloud Security Dojo Review</h3>
+                <p id="report-summary"></p>
+                <div class="actions">
+                  <a
+                    class="button"
+                    href="/api/report.html"
+                    target="_blank"
+                    rel="noopener"
+                    ><i data-lucide="printer"></i>Print / PDF</a
+                  ><a class="button secondary" href="/api/report.json" download
+                    ><i data-lucide="download"></i>Export JSON</a
+                  >
+                </div>
+              </div>
+            </div>
+            <section class="section">
+              <h2>Before / after comparison</h2>
+              <div class="compare-inputs">
+                <label
+                  >Before snapshot<input
+                    type="file"
+                    id="before"
+                    accept="application/json,.json" /></label
+                ><label
+                  >After snapshot<input
+                    type="file"
+                    id="after"
+                    accept="application/json,.json"
+                /></label>
+              </div>
+              <div id="comparison" role="status"></div>
+            </section>
+          </section>
+        </div>
+        <footer>
+          Independent community training. WebGoat is deliberately vulnerable. No
+          production workloads.
+        </footer>
+      </main>
+    </div>
+    <dialog id="consent">
+      <form method="dialog">
+        <div class="section-heading">
+          <h2>Authorize test</h2>
+          <button class="icon secondary" value="cancel" aria-label="Cancel">
+            <i data-lucide="x"></i>
+          </button>
+        </div>
+        <p id="consent-title"></p>
+        <p id="consent-expectation" class="muted"></p>
+        <label class="checkbox"
+          ><input type="checkbox" id="authorized" />I am authorized to test this
+          isolated training resource.</label
+        >
+        <div class="actions">
+          <button value="cancel" class="secondary">Cancel</button
+          ><button id="execute" value="execute" disabled>
+            <i data-lucide="play"></i>Run once
+          </button>
+        </div>
+      </form>
+    </dialog>
+  </body>
+</html>
