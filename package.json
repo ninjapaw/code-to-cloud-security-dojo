@@ -9,8 +9,13 @@
   "scripts": {
     "test": "node --test tests/*.test.mjs",
     "check:public": "node scripts/check-public.mjs",
+    "manage": "node scripts/manage.mjs",
     "wizard": "node scripts/manage.mjs",
     "plan": "node scripts/deploy.mjs plan",
+    "verify": "node scripts/deploy.mjs verify",
+    "report": "node scripts/deploy.mjs report",
+    "inventory": "node scripts/deploy.mjs inventory",
+    "what-if": "node scripts/deploy.mjs what-if",
     "source:sync": "node scripts/deploy.mjs source-sync",
     "source:check": "node scripts/deploy.mjs source-check",
     "source:upstream": "node scripts/deploy.mjs source-upstream",

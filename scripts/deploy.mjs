@@ -473,6 +473,9 @@ async function main() {
         2,
       ),
     );
+    console.log(
+      `Required confirmation: deploy:${sha(JSON.stringify(release))}:${config.subscriptionId}:${config.resourceGroup}`,
+    );
     if (action === "what-if") return;
     requireConfirmation(
       config,

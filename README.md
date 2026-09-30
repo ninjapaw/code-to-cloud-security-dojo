@@ -95,10 +95,15 @@ for this App Service architecture. Alerts and attack paths may legitimately be a
 
 ## Deployment and Operation
 
-Use `npm run wizard` or `node scripts/deploy.mjs <action>`. Add `--audit` to any
-lifecycle action for an offline, no-write plan. Azure mutations require exact
-action/subscription/group approval; release and cleanup also bind approval to
-their evidence hashes. No environment is inferred from a Git branch.
+Run `npm run manage` for the guided wizard, or `node scripts/deploy.mjs <action>`
+for automation. The wizard is a numbered menu over the same lifecycle actions:
+plan, configure, doctor, install, deploy, verify, report, remove, and an advanced
+submenu for individual steps. Add `--audit` to any lifecycle action for an
+offline, no-write plan. Azure mutations require exact action/subscription/group
+approval; release and cleanup also bind approval to their evidence hashes. The
+wizard shows the target lab, requires the resource group name to be typed for
+billable and destructive steps, and supplies the same confirmation string the
+CLI demands; it never weakens a gate. No environment is inferred from a Git branch.
 
 ### Configure the Training Scope
 
@@ -108,10 +113,10 @@ Docker is running and review regional SKU availability, quotas and policies firs
 
 ```text
 npm ci
-npm run wizard
+npm run manage
 ```
 
-Choose `configure`. Select the subscription by name, ID and tenant; enter the
+Choose `2) Configure`. Select the subscription by name, ID and tenant; enter the
 dedicated resource group, stable lab ID, Azure region, operator's **Entra object ID**
 and current authorized public IPv4 `/32`. Subsequent commands use the ignored
 local configuration. `DOJO_CONFIG` can select another private configuration.
@@ -137,8 +142,9 @@ switches tenants or changes the CLI's global subscription selection.
 
 ### Provision and Enable Protection
 
-Use the wizard's `provision` action, review the target and recurring charges, then
-provide the exact action/subscription/group confirmation and cost consent:
+Use the wizard's `4) Install` step, or run `provision` directly. Review the target
+and recurring charges, then provide the exact action/subscription/group
+confirmation and cost consent:
 
 ```text
 node scripts/deploy.mjs provision --confirm "provision:<subscription-id>:<resource-group>" --accept-costs
@@ -228,7 +234,9 @@ node scripts/deploy.mjs deploy
 ```
 
 An unconfirmed deploy prints the exact required token and exits without deployment.
-Review both scans and what-if before approving the exact release:
+`what-if` now prints the same token, so the wizard's `5) Deploy` step can show the
+what-if output and then apply the reviewed release after the resource group name
+is typed. Review both scans and what-if before approving the exact release:
 
 ```text
 node scripts/deploy.mjs deploy --confirm "deploy:<release-hash>:<subscription-id>:<resource-group>"
@@ -320,6 +328,10 @@ before external sharing. Review the whole dedicated group, including its ACR ima
 node scripts/deploy.mjs inventory
 node scripts/deploy.mjs deprovision --confirm "deprovision:<inventory-hash>:<subscription-id>:<resource-group>" --evidence-exported
 ```
+
+The wizard's `8) Remove` step runs the same two commands, printing the inventory
+and requiring both an evidence-export acknowledgement and the typed resource group
+name before deletion.
 
 Changed inventory invalidates the approval hash. Deletion rereads ownership and
 removes the group plus the matching owned portal subscription reader assignment.
