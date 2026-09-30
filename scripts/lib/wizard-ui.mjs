@@ -1,5 +1,10 @@
+// Console styling shared by the lifecycle wizard, matching the pawton deployment
+// scripts so both repositories read the same way in a terminal.
+
 import { stdout } from "node:process";
 
+// Escape codes are dropped when output is piped or NO_COLOR is set, keeping
+// captured wizard output parseable.
 const enabled = Boolean(stdout.isTTY) && !process.env.NO_COLOR;
 const wrap = (code) => (text) => (enabled ? `\u001b[${code}m${text}\u001b[0m` : text);
 
@@ -9,6 +14,7 @@ export const yellow = wrap("33");
 export const red = wrap("31");
 export const dim = wrap("2");
 
+// Progress, success and warning go to stdout; only fail() uses stderr.
 export const info = (message) => console.log(`${blue("==>")} ${message}`);
 export const ok = (message) => console.log(`${green("\u2713")} ${message}`);
 export const warn = (message) => console.log(`${yellow("!")} ${message}`);
@@ -35,6 +41,10 @@ export function showTarget(config) {
   );
 }
 
+/**
+ * Renders a numbered menu from [key, label, description] rows. An empty
+ * description prints the label alone, which suits entries like Back and Exit.
+ */
 export function menu(options) {
   console.log();
   options.forEach(([key, label, description]) => {

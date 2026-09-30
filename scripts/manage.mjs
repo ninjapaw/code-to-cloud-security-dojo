@@ -30,14 +30,19 @@ if (!stdin.isTTY) {
 }
 
 const prompt = createInterface({ input: stdin, output: stdout });
+// configPath is a URL when resolved from the repo and a plain string when it
+// comes from DOJO_CONFIG, so normalise it for display.
 const displayPath =
   typeof configPath === "string" ? configPath : fileURLToPath(configPath);
 
 const ask = async (question) => (await prompt.question(question)).trim();
 
+// Anything other than y/yes is a decline, so an accidental Enter is always safe.
 const confirmYesNo = async (question) =>
   /^y(es)?$/i.test(await ask(`${question} [y/N] `));
 
+// inherit streams the lifecycle output straight to the terminal, which is what
+// the operator needs to watch for every step except the two parsed below.
 function deployAction(action, args = []) {
   run("node", ["scripts/deploy.mjs", action, ...args], { inherit: true });
 }
@@ -53,6 +58,11 @@ function captureAction(action, args = []) {
   return output;
 }
 
+/**
+ * Reads the approval token that deploy.mjs prints as "Required confirmation:".
+ * Only what-if and inventory emit it; both bind the token to an evidence hash
+ * that changes whenever the release or the resource inventory changes.
+ */
 function requiredConfirmation(output) {
   const match = output.match(/^Required confirmation:\s*(.+)$/m);
   if (!match)
@@ -84,13 +94,20 @@ async function acceptCosts() {
   return false;
 }
 
+// Blocks Azure-touching actions until configure has run, so the operator gets a
+// pointer to option 2 instead of a validation stack trace.
 function requireConfigured(config) {
   if (config.subscriptionId && config.resourceGroup) return true;
   warn("This lab is not configured yet. Run Configure (option 2) first.");
   return false;
 }
 
-// Actions whose confirmation string is deterministic: "<action>:<sub>:<group>".
+/**
+ * Drives the actions whose approval token is deterministic
+ * ("<action>:<subscription>:<group>"), so there is nothing to parse first.
+ * Returns false when the operator declines at any prompt, which lets the guided
+ * install stop the remaining steps.
+ */
 async function gatedAction(config, action, { costs = false, note } = {}) {
   if (!requireConfigured(config)) return false;
   showTarget(config);
@@ -112,6 +129,11 @@ async function gatedAction(config, action, { costs = false, note } = {}) {
   return true;
 }
 
+/**
+ * Selects the target subscription and lab settings, then writes the gitignored
+ * local configuration. validateConfig runs before the write so a bad object ID
+ * or CIDR is rejected here rather than mid-deployment.
+ */
 async function configure(config) {
   banner("Configure the training lab");
   info("Listing enabled subscriptions. Use a dedicated training subscription.");
@@ -140,6 +162,7 @@ async function configure(config) {
   }
   validateConfig(config);
   const localPath = new URL("config/deploy.local.json", root);
+  // 0600 because this file names the subscription, operator and admin CIDR.
   await writeFile(localPath, `${JSON.stringify(config, null, 2)}\n`, {
     mode: 0o600,
   });
@@ -148,6 +171,11 @@ async function configure(config) {
   );
 }
 
+/**
+ * Previews the pending release and applies it only after review. The deploy
+ * token embeds a hash of the release manifest, so it must come from this
+ * what-if run rather than a remembered value.
+ */
 async function release(config) {
   if (!requireConfigured(config)) return;
   showTarget(config);
@@ -159,6 +187,10 @@ async function release(config) {
   deployAction("deploy", ["--confirm", confirmation]);
 }
 
+/**
+ * Deletes the lab. Evidence is unrecoverable afterwards, so this asks for the
+ * export acknowledgement before the typed resource group name.
+ */
 async function remove(config) {
   if (!requireConfigured(config)) return;
   showTarget(config);
@@ -177,6 +209,11 @@ async function remove(config) {
   ]);
 }
 
+/**
+ * Walks the ordered lifecycle a new lab needs. Every step keeps its own
+ * confirmation, and declining one stops the rest so a half-approved install
+ * never continues on to deployment.
+ */
 async function install(config) {
   if (!requireConfigured(config)) return;
   banner("Guided install");
@@ -239,10 +276,13 @@ async function advanced(config) {
   if (["build", "rotate"].includes(action))
     return void (await gatedAction(config, action));
   if (action === "repair") return release(config);
+  // source-* actions work on the local snapshot and never reach Azure.
   if (!action.startsWith("source-") && !requireConfigured(config)) return;
   deployAction(action);
 }
 
+// void keeps the short-circuit handlers returning undefined, so the dispatcher
+// below never treats a helper's boolean as a result.
 const actions = {
   1: () => deployAction("plan"),
   2: configure,
@@ -257,6 +297,8 @@ const actions = {
 
 async function main() {
   for (;;) {
+    // Reread on every pass so Configure is reflected without a restart, and
+    // parse raw because an unconfigured lab must still reach the menu.
     const config = JSON.parse(await readFile(configPath, "utf8"));
     banner("Code-to-Cloud Security Dojo — lifecycle wizard");
     console.log(`  Config file  ${displayPath}`);
@@ -286,6 +328,7 @@ async function main() {
     try {
       await selected(config);
     } catch (error) {
+      // One failed action should not end the session; report and re-prompt.
       fail(error.message);
     }
     await ask(dim("\nPress Enter to return to the menu..."));
@@ -295,5 +338,6 @@ async function main() {
 try {
   await main();
 } finally {
+  // Without this the readline interface keeps the event loop alive on exit.
   prompt.close();
 }

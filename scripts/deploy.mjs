@@ -473,6 +473,8 @@ async function main() {
         2,
       ),
     );
+    // Printed for both what-if and deploy so the reviewed release hash is
+    // visible before approval, mirroring what inventory does for deprovision.
     console.log(
       `Required confirmation: deploy:${sha(JSON.stringify(release))}:${config.subscriptionId}:${config.resourceGroup}`,
     );
