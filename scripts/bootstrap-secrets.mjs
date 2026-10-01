@@ -11,7 +11,7 @@ import {
   assertOwned,
 } from "../shared/config.mjs";
 import { AzureClient } from "../shared/azure.mjs";
-import { az, run, configHash, requireConfirmation } from "./lib/lifecycle.mjs";
+import { az, run, configHash, requireConfirmation, verifiedPrivateSecrets } from "./lib/lifecycle.mjs";
 import { createDeploymentStatus } from "./lib/deployment-status.mjs";
 
 const { positionals, values } = parseArgs({
@@ -323,57 +323,22 @@ async function main() {
       ],
       { json: true },
     );
-    const workspace = az(
-      config,
-      [
-        "monitor",
-        "log-analytics",
-        "workspace",
-        "show",
-        "--resource-group",
-        config.resourceGroup,
-        "--workspace-name",
-        `${config.labId}-logs`,
-        "--query",
-        "customerId",
-      ],
-      { json: true },
-    );
-    const marker = `DOJO_BOOTSTRAP_READY ${manifest.runId}`;
-    const query = `AppServiceConsoleLogs | where _ResourceId =~ '${workerPath}' and ResultDescription contains '${marker}' | project ResultDescription | take 1`;
-    await status.update("Waiting for private vault completion marker");
+    await status.update("Waiting for ARM readback of both private vault secrets");
     let observed = false;
     for (let attempt = 0; attempt < 90; attempt++) {
-      try {
-        const rows = az(
-          config,
-          [
-            "monitor",
-            "log-analytics",
-            "query",
-            "--workspace",
-            workspace,
-            "--analytics-query",
-            query,
-            "--timespan",
-            "PT1H",
-          ],
-          { json: true },
-        );
-        if (rows.some((row) => row.ResultDescription?.includes(marker))) {
-          observed = true;
-          break;
-        }
-      } catch (error) {
-        if (!error.message.includes("Failed to resolve table")) throw error;
+      if (await verifiedPrivateSecrets(client, config, resourceNames.vault, manifest.runId)) {
+        observed = true;
+        break;
       }
       await new Promise((resolve) => setTimeout(resolve, 5000));
     }
     if (!observed)
-      throw new Error("Private vault bootstrap completion was not observed");
+      throw new Error("Private vault readback for both credentials was not observed");
   } finally {
     if (attempted) await cleanup();
   }
+  if (!await verifiedPrivateSecrets(client, config, resourceNames.vault, manifest.runId))
+    throw new Error("Private vault metadata changed during worker cleanup");
   await writeFile(
     join(output, "private-bootstrap-proof.json"),
     `${JSON.stringify(

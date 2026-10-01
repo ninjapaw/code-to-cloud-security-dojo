@@ -269,10 +269,12 @@ node scripts/bootstrap-secrets.mjs apply --confirm "bootstrap:<preview-hash>:<su
 
 `prepare` builds and scans a pinned worker image, pushes it by digest, and prints
 the state-bound token from ARM what-if. `apply` repeats what-if, verifies both
-secrets inside the VNet and requires a run-specific non-secret Log Analytics
-marker. It removes the temporary site, identity and grants on completion or
-failure. A fresh online marker and cleanup readback are required before `deploy`
-can accept the ignored, short-lived bootstrap proof. Review the stored preview;
+secrets inside the VNet, then stamps their existing versions with a non-secret
+run ID. ARM rereads both tags, enabled state and expiry without returning secret
+values. It removes the temporary site, identity and grants on completion or
+failure, preserving the portal plan. A fresh ARM readback and cleanup are required
+before `deploy` accepts the ignored, short-lived bootstrap proof. Log Analytics
+console events are diagnostic only. Review the stored preview;
 never pass secret values on the command line or enable public vault access.
 
 No application image is selected in this stage. Two hosting plans, ACR, private

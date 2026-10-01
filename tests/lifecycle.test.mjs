@@ -8,11 +8,12 @@ import {
   createDeploymentStatus,
   renderDeploymentStatus,
 } from "../scripts/lib/deployment-status.mjs";
-import { ensureBootstrapSecrets, startBootstrapHealth } from "../scripts/secret-bootstrap.mjs";
+import { ensureBootstrapSecrets, stampBootstrapSecrets, startBootstrapHealth } from "../scripts/secret-bootstrap.mjs";
 import {
   configHash,
   requireConfirmation,
   validateRelease,
+  verifiedPrivateSecrets,
 } from "../scripts/lib/lifecycle.mjs";
 import { confirmation } from "../shared/config.mjs";
 import { isLabHostname, names } from "../shared/config.mjs";
@@ -126,6 +127,46 @@ test("private credential bootstrap is idempotent and refuses implicit rotation",
   values.get("admin-password").properties.enabled = false;
   await assert.rejects(ensureBootstrapSecrets(secrets), /explicit rotation/);
   assert.equal(values.get("admin-password").value, original);
+});
+test("private readback stamps both existing secrets without rotating values", async () => {
+  const values = new Map(["admin-password", "session-key"].map((name) => [name, {
+    value: `existing-${name}`, properties: { version: "existing-version", tags: { managedBy: "code-to-cloud-security-dojo", purpose: name } },
+  }]));
+  const secrets = {
+    async getSecret(name) { return values.get(name); },
+    async updateSecretProperties(name, version, options) {
+      assert.equal(version, "existing-version");
+      values.get(name).properties.tags = options.tags;
+    },
+  };
+  await stampBootstrapSecrets(secrets, "run-123");
+  for (const [name, secret] of values) {
+    assert.equal(secret.value, `existing-${name}`);
+    assert.equal(secret.properties.tags.bootstrapRunId, "run-123");
+    assert.equal(secret.properties.tags.purpose, name);
+  }
+});
+test("ARM proof requires fresh enabled metadata for both exact secrets", async () => {
+  const vaultPath = "/subscriptions/test/resourceGroups/training/providers/Microsoft.KeyVault/vaults/training-vault";
+  const metadata = new Map(["admin-password", "session-key"].map((name) => [name, {
+    id: `${vaultPath}/secrets/${name}`,
+    tags: { managedBy: "code-to-cloud-security-dojo", purpose: name, bootstrapRunId: "run-123" },
+    properties: { attributes: { enabled: true, exp: Math.floor(Date.now() / 1000) + 86400 } },
+  }]));
+  const client = {
+    scope: "/subscriptions/test",
+    async request(path) { return metadata.get(path.split("/secrets/")[1].split("?")[0]); },
+  };
+  const scope = { resourceGroup: "training" };
+  assert.equal(await verifiedPrivateSecrets(client, scope, "training-vault", "run-123"), true);
+  metadata.get("session-key").tags.bootstrapRunId = "another-run";
+  assert.equal(await verifiedPrivateSecrets(client, scope, "training-vault", "run-123"), false);
+  metadata.get("session-key").tags.bootstrapRunId = "run-123";
+  metadata.get("session-key").properties.attributes.exp = 0;
+  assert.equal(await verifiedPrivateSecrets(client, scope, "training-vault", "run-123"), false);
+  metadata.get("session-key").properties.attributes.exp = Math.floor(Date.now() / 1000) + 86400;
+  metadata.get("session-key").id = `${vaultPath}/secrets/wrong`;
+  assert.equal(await verifiedPrivateSecrets(client, scope, "training-vault", "run-123"), false);
 });
 test("private bootstrap health listener answers App Service warmup", async () => {
   const server = startBootstrapHealth(0, "127.0.0.1");

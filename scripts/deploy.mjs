@@ -37,6 +37,7 @@ import {
   ownedReaderAssignments,
   releaseParameters,
   requireReleaseCostApproval,
+  verifiedPrivateSecrets,
 } from "./lib/lifecycle.mjs";
 
 const { values, positionals } = parseArgs({
@@ -834,43 +835,8 @@ async function verifyPrivateCredentials(client, config, output, resourceNames) {
       if (error.status !== 404) throw error;
     }
   }
-  const workspace = az(
-    config,
-    [
-      "monitor",
-      "log-analytics",
-      "workspace",
-      "show",
-      "--resource-group",
-      config.resourceGroup,
-      "--workspace-name",
-      `${config.labId}-logs`,
-      "--query",
-      "customerId",
-    ],
-    { json: true },
-  );
-  const marker = `DOJO_BOOTSTRAP_READY ${proof.runId}`;
-  const query = `AppServiceConsoleLogs | where _ResourceId =~ '${workerPath}' and ResultDescription contains '${marker}' | project ResultDescription | take 1`;
-  const rows = az(
-    config,
-    [
-      "monitor",
-      "log-analytics",
-      "query",
-      "--workspace",
-      workspace,
-      "--analytics-query",
-      query,
-      "--timespan",
-      "PT1H",
-    ],
-    { json: true },
-  );
-  if (!rows.some((row) => row.ResultDescription?.includes(marker)))
-    throw new Error(
-      "Private vault bootstrap completion marker was not observed",
-    );
+  if (!await verifiedPrivateSecrets(client, config, resourceNames.vault, proof.runId))
+    throw new Error("Private vault credential proof no longer matches both secret versions");
   console.log("Private vault credentials verified by temporary VNet worker");
 }
 

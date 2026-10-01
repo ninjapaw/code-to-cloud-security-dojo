@@ -44,6 +44,29 @@ export function configHash(config) {
   return createHash("sha256").update(JSON.stringify(config)).digest("hex");
 }
 
+export async function verifiedPrivateSecrets(client, config, vaultName, runId) {
+  const vaultPath = `${client.scope}/resourceGroups/${config.resourceGroup}/providers/Microsoft.KeyVault/vaults/${vaultName}`;
+  for (const name of ["admin-password", "session-key"]) {
+    let secret;
+    try {
+      secret = await client.request(`${vaultPath}/secrets/${name}?api-version=2024-11-01`);
+    } catch (error) {
+      if (error.status === 404) return false;
+      throw error;
+    }
+    if (
+      secret.id?.toLowerCase() !== `${vaultPath}/secrets/${name}`.toLowerCase() ||
+      secret.tags?.managedBy !== "code-to-cloud-security-dojo" ||
+      secret.tags?.purpose !== name ||
+      secret.tags?.bootstrapRunId !== runId ||
+      secret.properties?.attributes?.enabled !== true ||
+      !Number.isFinite(secret.properties?.attributes?.exp) ||
+      secret.properties.attributes.exp <= Date.now() / 1000 + 3600
+    ) return false;
+  }
+  return true;
+}
+
 export function ownedReaderAssignments(config, principalId, assignments) {
   const scope = `/subscriptions/${config.subscriptionId}`.toLowerCase();
   return assignments.filter(

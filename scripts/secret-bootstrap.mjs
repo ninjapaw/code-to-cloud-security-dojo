@@ -27,6 +27,20 @@ export async function ensureBootstrapSecrets(secrets) {
   }
 }
 
+export async function stampBootstrapSecrets(secrets, runId) {
+  for (const name of ["admin-password", "session-key"]) {
+    const current = await secrets.getSecret(name);
+    await secrets.updateSecretProperties(name, current.properties.version, {
+      tags: { ...current.properties.tags, bootstrapRunId: runId },
+    });
+    const verified = await secrets.getSecret(name);
+    if (
+      verified.properties.tags?.bootstrapRunId !== runId ||
+      verified.value !== current.value
+    ) throw new Error("Private credential metadata readback failed");
+  }
+}
+
 export function startBootstrapHealth(port = 8080, host = "0.0.0.0") {
   return createServer((request, response) => {
     response.writeHead(200, { "Content-Type": "text/plain" });
@@ -54,6 +68,7 @@ if (
   try {
     await ensureBootstrapSecrets(secrets);
     await ensureBootstrapSecrets(secrets);
+    await stampBootstrapSecrets(secrets, runId);
     const readyMarker = `DOJO_BOOTSTRAP_READY ${runId}`;
     console.log(readyMarker);
     startBootstrapHealth();
