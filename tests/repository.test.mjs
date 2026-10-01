@@ -100,7 +100,7 @@ test("all mutation audits are offline and do not write outputs", async () => {
   }
 });
 test("documentation local links and heading anchors resolve", async () => {
-  for (const relative of ["README.md", "SECURITY.md", "apps/dojo/README.md"]) {
+  for (const relative of ["README.md", "SECURITY.md", "apps/dojo/README.md", "apps/drowsy-dragon/README.md", "apps/nginx-proxy/README.md"]) {
     const path = join(root, relative);
     const markdown = await readFile(path, "utf8");
     assert.doesNotMatch(markdown, /\]\((?:\.\.\/)*docs\//);

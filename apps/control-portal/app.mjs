@@ -170,6 +170,8 @@ export function createApp({
         ...value.release,
         dojoDigest: config.dojoDigest,
         portalDigest: config.portalDigest,
+        drowsyDragonDigest: config.drowsyDragonDigest,
+        nginxProxyDigest: config.nginxProxyDigest,
       };
       if (!preview) await store.put(`reports/${value.generatedAt}.json`, value);
       reportCache = { time: Date.now(), value };

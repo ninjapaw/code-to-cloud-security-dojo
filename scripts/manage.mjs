@@ -11,6 +11,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { root, configPath, validateConfig } from "../shared/config.mjs";
 import { run } from "./lib/lifecycle.mjs";
+import { nginxMode } from "../shared/nginx-proxy.mjs";
 import {
   banner,
   showTarget,
@@ -160,6 +161,30 @@ async function configure(config) {
     config[key] =
       (await ask(`${label} [${config[key] || ""}]: `)) || config[key];
   }
+  const dragon = (
+    await ask(`Include Drowsy Dragon (no-ingress ACI; recurring charges)? yes/no [${config.drowsyDragonEnabled ? "yes" : "no"}]: `)
+  ).toLowerCase();
+  if (dragon && !["yes", "no"].includes(dragon))
+    throw new Error("Enter yes or no for Drowsy Dragon");
+  config.drowsyDragonEnabled = dragon
+    ? dragon === "yes"
+    : config.drowsyDragonEnabled === true;
+  if (!config.drowsyDragonEnabled)
+    info("Disabling Drowsy Dragon does not delete an existing instance; use the approved lab removal workflow.");
+  const proxy = (
+    await ask(`Include the original NGINX Proxy (separate private App Service; recurring charges)? yes/no [${config.nginxProxyEnabled ? "yes" : "no"}]: `)
+  ).toLowerCase();
+  if (proxy && !["yes", "no"].includes(proxy))
+    throw new Error("Enter yes or no for NGINX Proxy");
+  config.nginxProxyEnabled = proxy ? proxy === "yes" : config.nginxProxyEnabled === true;
+  if (config.nginxProxyEnabled) {
+    const current = nginxMode(config.nginxProxyMode).mode;
+    config.nginxProxyMode = nginxMode(
+      (await ask(`NGINX mode: vulnerable (1.30.3) or remediated (1.30.4, target CVE only) [${current}]: `)) || current,
+    ).mode;
+  } else {
+    info("Disabling NGINX Proxy does not remove its existing site, plan or private endpoint.");
+  }
   validateConfig(config);
   const localPath = new URL("config/deploy.local.json", root);
   // 0600 because this file names the subscription, operator and admin CIDR.
@@ -184,7 +209,13 @@ async function release(config) {
   warn("Review the what-if output above before applying the release.");
   if (!(await confirmYesNo("Apply this release?"))) return warn("Cancelled.");
   if (!(await groupTyped(config))) return;
-  deployAction("deploy", ["--confirm", confirmation]);
+  const args = ["--confirm", confirmation];
+  if (config.drowsyDragonEnabled || config.nginxProxyEnabled) {
+    warn("This release includes continuously billed optional image-demo resources.");
+    if (!(await acceptCosts())) return;
+    args.push("--accept-costs");
+  }
+  deployAction("deploy", args);
 }
 
 /**
@@ -260,6 +291,8 @@ async function advanced(config) {
     ["9", "repair", "reapply the approved release"],
     ["10", "rotate", "rotate Key Vault credentials"],
     ["11", "inventory", "list resources a removal would delete"],
+    ["12", "dragon-build", "build and scan Drowsy Dragon locally (Docker/DHI and Trivy required)"],
+    ["13", "nginx-build", "build and scan the selected NGINX Proxy mode locally"],
     ["0", "Back", ""],
   ];
   banner("Advanced lifecycle steps");
@@ -271,6 +304,12 @@ async function advanced(config) {
   const [, action] = picked;
   if (action === "image-build")
     return run("node", ["scripts/build-dojo.mjs"], { inherit: true });
+  if (action === "dragon-build")
+    return run("node", ["scripts/build-drowsy-dragon.mjs"], { inherit: true });
+  if (action === "nginx-build")
+    return run("node", [
+      "scripts/build-nginx-proxy.mjs", "--mode", nginxMode(config.nginxProxyMode).mode,
+    ], { inherit: true });
   if (["provision", "protection"].includes(action))
     return void (await gatedAction(config, action, { costs: true }));
   if (["build", "rotate"].includes(action))

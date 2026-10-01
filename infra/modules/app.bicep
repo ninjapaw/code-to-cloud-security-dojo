@@ -8,12 +8,14 @@ param port string
 param workspaceId string
 param subnetId string = ''
 param settings { name: string, value: string }[] = []
+param healthCheckPath string = publicAccess ? '/health' : '/WebGoat/actuator/health'
+param evidenceTags object = {}
 resource identity 'Microsoft.ManagedIdentity/userAssignedIdentities@2024-11-30' existing = { name: '${name}-identity' }
 resource plan 'Microsoft.Web/serverfarms@2024-11-01' existing = { name: '${name}-plan' }
 resource app 'Microsoft.Web/sites@2024-11-01' = {
   name: name
   location: location
-  tags: { 'dojo.labId': labId, 'dojo.managedBy': 'code-to-cloud-security-dojo' }
+  tags: union(evidenceTags, { 'dojo.labId': labId, 'dojo.managedBy': 'code-to-cloud-security-dojo' })
   kind: 'app,linux,container'
   identity: { type: 'UserAssigned', userAssignedIdentities: { '${identity.id}': {} } }
   properties: {
@@ -28,7 +30,7 @@ resource app 'Microsoft.Web/sites@2024-11-01' = {
       acrUseManagedIdentityCreds: true
       acrUserManagedIdentityID: identity.properties.clientId
       alwaysOn: true
-      healthCheckPath: publicAccess ? '/health' : '/WebGoat/actuator/health'
+      healthCheckPath: healthCheckPath
       ftpsState: 'Disabled'
       minTlsVersion: '1.2'
       scmMinTlsVersion: '1.2'

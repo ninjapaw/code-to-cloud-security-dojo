@@ -7,6 +7,19 @@ production-ready and must not host real data or credentials. The imported WebGoa
 workload contains known educational vulnerabilities; the control portal, lifecycle
 tooling and deployment boundaries are not intended to be vulnerable.
 
+The optional [Drowsy Dragon](apps/drowsy-dragon/README.md) retains a pinned DHI
+.NET SDK image for OS-package assessment. Its name and pin are not proof of
+specific vulnerabilities: preserve actual scan evidence. It runs without an IP
+address, exposed ports or application credentials and is not an HTTP exploit
+target. Its pull-only identity must never receive portal or evidence permissions.
+
+The optional [NGINX Proxy](apps/nginx-proxy/README.md) preserves a reviewed,
+licensed source snapshot from the earlier NinjaPaws dojo. Its affected and
+target-CVE-remediated modes run in a separate private App Service, never in
+front of WebGoat or the admin portal. Do not give it portal credentials or
+evidence/Defender-write roles. A package pin, configured dashboard badge or
+startup snapshot is not proof of exploitation or a Defender finding.
+
 Use a dedicated Azure training subscription and narrowly scoped identities. Keep
 the workload private and the portal restricted to the approved admin IP. Validate
 network access, egress, identity isolation, Key Vault references and credential
@@ -53,3 +66,18 @@ CI has no Azure deployment credentials. It records intentional workload findings
 but gates HIGH/CRITICAL findings in the control-portal image. Deployment and paid
 Defender changes require separate operator approval. No detection, prevention,
 compliance outcome or risk reduction is guaranteed by this project.
+
+Drowsy Dragon's optional CI scan uses DHI registry secrets only on explicit
+manual dispatch. Never forward those credentials into an image or Azure runtime;
+Azure pulls from the lab ACR using managed identity. Keep its raw scanner
+receipts private, verify digest/hash bindings, and treat missing evidence as
+unknown. Disabling the option does not stop a previously deployed instance or
+its charges; use the approved resource-group removal workflow.
+
+The NGINX collector accepts only the exact lab App Service hostname and fixed
+evidence path, refuses redirects, limits the JSON response to 64 KiB and rejects
+missing raw startup measurements. The legacy application's configuration
+fallbacks are not accepted as runtime proof. Source and scan tampering, access
+failures and missing evidence remain explicit failures or unknown checks.
+Its plan may incur charges before its site is deployed; disabling the flag is
+not deletion. Export evidence and review the complete owned group inventory.

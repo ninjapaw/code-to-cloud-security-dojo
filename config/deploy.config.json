@@ -8,6 +8,9 @@
   "adminCidr": "",
   "operatorObjectId": "",
   "appServiceSku": "B2",
+  "drowsyDragonEnabled": false,
+  "nginxProxyEnabled": false,
+  "nginxProxyMode": "vulnerable",
   "source": {
     "repository": "https://github.com/WebGoat/WebGoat.git",
     "revision": "872d6149d4ef29e4929c2f4eda279f7fbedc52e8"

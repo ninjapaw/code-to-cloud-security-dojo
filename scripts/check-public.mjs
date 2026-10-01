@@ -5,6 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { run } from "./lib/lifecycle.mjs";
 import { root } from "../shared/config.mjs";
 import { verifySource } from "./lib/dojo-source.mjs";
+import { verifyNginxSource } from "./lib/nginx-proxy.mjs";
 
 const patterns = [
   [
@@ -74,6 +75,7 @@ async function main() {
     fileURLToPath(new URL("apps/dojo/", root)),
     defaults.source,
   );
+  const nginxSource = await verifyNginxSource();
   const files = [
     ...new Set(
       run("git", [
@@ -89,6 +91,7 @@ async function main() {
   ];
   let ownedCount = 0;
   let upstreamCount = 0;
+  let nginxCount = 0;
   let failures = 0;
   for (const path of files) {
     const absolute = resolve(directory, path);
@@ -108,6 +111,8 @@ async function main() {
     const findings = publicationFindings(path, content);
     if (path.startsWith("apps/dojo/upstream/")) {
       upstreamCount++;
+    } else if (path.startsWith("apps/nginx-proxy/upstream/")) {
+      nginxCount++;
     } else {
       ownedCount++;
     }
@@ -126,12 +131,13 @@ async function main() {
       }
     }
   }
-  if (upstreamCount !== source.files) {
+  if (upstreamCount !== source.files || nginxCount !== nginxSource.files) {
     failures++;
     console.error(
       "Imported source files are missing from the publication set; check ignore rules before publishing.",
     );
   }
+  console.log(`Verified ${nginxCount} imported NGINX source files against their reviewed pin.`);
   console.log(
     `Checked ${ownedCount} owned files and ${upstreamCount} verified upstream files. ${failures} publication issue(s). Matched values are never printed.`,
   );

@@ -1,12 +1,13 @@
 import { readFile } from "node:fs/promises";
 import { createApp } from "./app.mjs";
-import { names, isLabHostname } from "../../shared/config.mjs";
+import { names, isLabHostname, booleanSetting } from "../../shared/config.mjs";
 import { AzureClient } from "../../shared/azure.mjs";
 import {
   BlobEvidenceStore,
   MemoryEvidenceStore,
 } from "../../shared/evidence-store.mjs";
 import { collectReport, emptyReport } from "../../shared/report.mjs";
+import { nginxMode } from "../../shared/nginx-proxy.mjs";
 
 const preview = process.argv.includes("--preview");
 const base = JSON.parse(
@@ -25,6 +26,15 @@ const config = {
   },
 };
 const resourceNames = names(config);
+config.drowsyDragonEnabled = booleanSetting(
+  process.env.DOJO_DROWSY_DRAGON_ENABLED, "DOJO_DROWSY_DRAGON_ENABLED", base.drowsyDragonEnabled,
+);
+config.nginxProxyEnabled = booleanSetting(
+  process.env.DOJO_NGINX_PROXY_ENABLED, "DOJO_NGINX_PROXY_ENABLED", base.nginxProxyEnabled,
+);
+config.nginxProxyMode = nginxMode(
+  process.env.DOJO_NGINX_PROXY_MODE ?? base.nginxProxyMode,
+).mode;
 config.protection = process.env.DOJO_PROTECTION_CONFIG
   ? JSON.parse(process.env.DOJO_PROTECTION_CONFIG)
   : base.protection;
@@ -38,6 +48,8 @@ Object.assign(config, {
   dojoName: resourceNames.dojo,
   dojoDigest: process.env.DOJO_IMAGE_DIGEST,
   portalDigest: process.env.DOJO_PORTAL_DIGEST,
+  drowsyDragonDigest: process.env.DOJO_DROWSY_DRAGON_DIGEST,
+  nginxProxyDigest: process.env.DOJO_NGINX_PROXY_DIGEST,
   dojoResourceId: `/subscriptions/${config.subscriptionId}/resourceGroups/${config.resourceGroup}/providers/Microsoft.Web/sites/${resourceNames.dojo}`,
 });
 if (
@@ -51,6 +63,16 @@ if (
   throw new Error(
     "Hosted tenant, subscription, HTTPS origin and fixed target must be configured",
   );
+if (
+  !preview && config.drowsyDragonEnabled &&
+  !/^sha256:[a-f0-9]{64}$/.test(config.drowsyDragonDigest || "")
+)
+  throw new Error("Enabled Drowsy Dragon requires its approved image digest");
+if (
+  !preview && config.nginxProxyEnabled &&
+  !/^sha256:[a-f0-9]{64}$/.test(config.nginxProxyDigest || "")
+)
+  throw new Error("Enabled NGINX Proxy requires its approved image digest");
 const client = preview ? null : new AzureClient(config, { hosted: true });
 const store = preview
   ? new MemoryEvidenceStore()
@@ -61,7 +83,7 @@ const app = createApp({
   preview,
   reportProvider: preview
     ? async () => emptyReport(config, "read-only-preview")
-    : (runs) => collectReport(config, client, runs),
+    : (runs) => collectReport(config, client, runs, store),
 });
 const port = Number(process.env.PORT || 4397);
 const host = preview ? "127.0.0.1" : process.env.HOST || "0.0.0.0";

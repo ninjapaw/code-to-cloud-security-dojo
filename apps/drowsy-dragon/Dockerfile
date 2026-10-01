@@ -1,0 +1,5 @@
+FROM dhi.io/dotnet:8-sdk@sha256:a04b53a72db39c248b8947109d1cce6718a7449b7828d85bdb1b8e1cc4e1b6ef
+
+RUN dpkg-query -W libc6 libc-bin tar libgcrypt20
+
+CMD ["sleep", "infinity"]

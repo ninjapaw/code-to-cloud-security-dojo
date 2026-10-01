@@ -13,7 +13,10 @@ param vaultName string
 param storageName string
 param portalName string
 param dojoName string
+param nginxProxyEnabled bool = false
+param nginxProxyName string = '${replace(dojoName, '-app', '')}-proxy'
 var tags = { 'dojo.labId': labId, 'dojo.managedBy': 'code-to-cloud-security-dojo' }
+var appNames = concat([portalName, dojoName], nginxProxyEnabled ? [nginxProxyName] : [])
 resource registry 'Microsoft.ContainerRegistry/registries@2025-04-01' = {
   name: registryName
   location: location
@@ -21,12 +24,12 @@ resource registry 'Microsoft.ContainerRegistry/registries@2025-04-01' = {
   sku: { name: 'Basic' }
   properties: { adminUserEnabled: false, anonymousPullEnabled: false, publicNetworkAccess: 'Enabled' }
 }
-resource identities 'Microsoft.ManagedIdentity/userAssignedIdentities@2024-11-30' = [for name in [portalName, dojoName]: {
+resource identities 'Microsoft.ManagedIdentity/userAssignedIdentities@2024-11-30' = [for name in appNames: {
   name: '${name}-identity'
   location: location
   tags: tags
 }]
-resource pulls 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for (name, index) in [portalName, dojoName]: {
+resource pulls 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for (name, index) in appNames: {
   name: guid(registry.id, name, 'AcrPull')
   scope: registry
   properties: {
@@ -35,7 +38,7 @@ resource pulls 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for (name
     principalType: 'ServicePrincipal'
   }
 }]
-resource plans 'Microsoft.Web/serverfarms@2024-11-01' = [for name in [portalName, dojoName]: {
+resource plans 'Microsoft.Web/serverfarms@2024-11-01' = [for name in appNames: {
   name: '${name}-plan'
   location: location
   tags: tags

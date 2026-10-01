@@ -1,2 +1,3 @@
 scripts/*.sh text eol=lf
 apps/dojo/upstream/** -text
+apps/nginx-proxy/upstream/** -text

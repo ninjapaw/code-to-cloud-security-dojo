@@ -5,13 +5,14 @@ param virtualNetworkId string
 param targetId string
 param groupId string
 param zoneName string
+param zoneLinkName string = '${name}-link'
 resource zone 'Microsoft.Network/privateDnsZones@2024-06-01' = {
   name: zoneName
   location: 'global'
 }
 resource link 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = {
   parent: zone
-  name: '${name}-link'
+  name: zoneLinkName
   location: 'global'
   properties: { registrationEnabled: false, virtualNetwork: { id: virtualNetworkId } }
 }

@@ -9,6 +9,17 @@ A lifecycle wizard and separate admin portal follow pinned WebGoat
 source through scanning, ACR, a private App Service runtime, Defender observations,
 bounded test requests and executive evidence reports.
 
+[Drowsy Dragon](apps/drowsy-dragon/README.md) adds an opt-in, digest-pinned
+DHI .NET 8 SDK package-assessment demo. It inventories `libc6`, `libc-bin`, `tar`
+and `libgcrypt20`, then sleeps in an Azure Container Instance with no public
+ingress. Its build, scan, release, package findings and cleanup use the same
+approved lifecycle; the existing WebGoat deployment remains the default.
+
+The original [NGINX Proxy](apps/nginx-proxy/README.md) is another optional image
+story, imported from the earlier NinjaPaws dojo. Compare the affected NGINX 1.30.3
+map/regex configuration with the 1.30.4 target-CVE remediation on its own private
+App Service. It can run alongside both WebGoat and Drowsy Dragon.
+
 **Status:** experimental training software, not production security infrastructure.
 Local tests and image builds do not establish live Azure readiness or protection.
 Validate deployment, access controls, rotation and detections on a disposable target.
@@ -18,6 +29,8 @@ Validate deployment, access controls, rotation and detections on a disposable ta
 - [Start locally](#start-locally)
 - [Architecture](#architecture)
 - [Source and image lifecycle](apps/dojo/README.md)
+- [Drowsy Dragon package demo](apps/drowsy-dragon/README.md)
+- [Original NGINX proxy image story](apps/nginx-proxy/README.md)
 - [Defender and code-to-cloud story](#defender-and-code-to-cloud-story)
 - [Deployment and operation](#deployment-and-operation)
 - [Security](#security)
@@ -50,6 +63,11 @@ The `dojo` workload uses a pinned WebGoat source snapshot. The Node/Express
 [release IaC](infra/main.bicep) selects reviewed image digests.
 
 - Two Linux App Service plans (default B2), one Basic ACR and two pull identities.
+- Optional Drowsy Dragon ACI with its own ACR-only pull identity, no IP address,
+  no exposed ports and no portal/evidence credentials. It has no HTTP endpoint.
+- Optional NGINX Proxy on a third, separate App Service plan with private ingress
+  and its own ACR-only identity. It proxies its original dashboard, not the other
+  workloads. Its private endpoint reuses the App Service DNS zone/VNet link.
 - Private Dojo workload endpoint with public access disabled. WebWolf is not exposed.
 - Portal VNet integration and a single authorized public IPv4 `/32` restriction.
 - Key Vault with RBAC, purge protection, private endpoint and operator-IP firewall.
@@ -81,6 +99,14 @@ with Microsoft Security DevOps, builds and scans both images, and retains eviden
 It has **no Azure deployment credentials or write operations**. Operator releases
 use the wizard. WebGoat vulnerabilities are intentional and require review; high
 or critical portal image vulnerabilities fail the release build.
+
+The optional Drowsy Dragon CI job is manually enabled and needs DHI pull
+credentials, not Azure credentials. It retains all-severity Trivy JSON/SARIF and
+package inventory without inventing an expected CVE list. Its portal/report
+tracking keeps Trivy evidence separate from Defender observations.
+The independent optional NGINX CI job builds/scans both affected and target-CVE
+remediated modes. Both optional demos use the same package/scan evidence helpers,
+and may be enabled together for a four-image release including the admin portal.
 
 Defender GitHub consent, repository discovery, native GitHub security features and
 agentless scanner eligibility are separate prerequisites. Connect this repository
@@ -121,6 +147,12 @@ dedicated resource group, stable lab ID, Azure region, operator's **Entra object
 and current authorized public IPv4 `/32`. Subsequent commands use the ignored
 local configuration. `DOJO_CONFIG` can select another private configuration.
 Never put passwords, tokens or real training accounts in committed configuration.
+The wizard also offers Drowsy Dragon, disabled by default. Enabling
+`drowsyDragonEnabled` adds an ACI release with separate recurring-cost approval;
+see its [walkthrough](apps/drowsy-dragon/README.md#opt-in-to-deployment).
+The wizard separately offers `nginxProxyEnabled` and `nginxProxyMode`
+(`vulnerable` or `remediated`). Rerun approved provisioning when enabling NGINX
+to create its additional plan and identity. Defaults do not enable either demo.
 
 The bootstrap operator needs resource creation and role-assignment rights at the
 lab group, subscription role-assignment rights for portal Security Reader, and
@@ -197,6 +229,8 @@ particularly Java source analysis versus Maven dependency analysis. This reposit
 contains the pinned source and Maven manifest under `apps/dojo/upstream`; verify
 scanner scope and exclusions include that directory. The portal deliberately keeps
 connector/native coverage unknown when it cannot independently verify it.
+The imported NGINX JavaScript/dependency snapshot lives under
+`apps/nginx-proxy/upstream`; verify its scanner coverage and exclusions separately.
 
 CI does not deploy and needs no Azure OIDC trust. Any future automated deployment
 must use scoped OIDC with verified claims and approval of the scanned artifact.
@@ -227,6 +261,12 @@ pushing either. Portal HIGH/CRITICAL findings fail the build. Intentional Dojo
 findings still require review and must be distinguished from scanner failures.
 Source labels, tree/content hashes and scan hashes accompany immutable ACR digests
 in the ignored release manifest. A changed configuration invalidates that manifest.
+When Drowsy Dragon is enabled, the same build includes its pinned SDK image,
+package inventory and complete Trivy scan. A release refuses missing or
+tampered demo evidence; all enabled images must finish scanning before any push.
+Enabled NGINX releases also verify the original source snapshot, selected package
+version and full-image Trivy evidence. Its affected and target-CVE-remediated
+modes are documented in the [image story](apps/nginx-proxy/README.md).
 
 ```text
 node scripts/deploy.mjs what-if
@@ -249,6 +289,10 @@ does not rebuild, rotate all credentials or weaken protection. Retain the previo
 manifest and scans for rollback. `--release <manifest-path>` selects a reviewed
 prior manifest with its original source/configuration binding. Do not commit
 sensitive release records or confuse a restart/digest with verified HTTP health.
+Enabled Drowsy Dragon releases also require `--accept-costs` and preserve a
+digest/scan-hash-bound receipt in the private evidence store. ACI readback and
+package findings appear in the portal and HTML/JSON reports; no HTTP test is
+sent to the sleeping container.
 
 ### Sign In and Walk Through the Story
 
@@ -287,7 +331,7 @@ and check hosting eligibility first. Those timings are not guarantees.
 Microsoft-generated sample alerts use simulated resources and cannot be presented
 as detections of this lab.
 
-Reports filter alerts to the exact resource and use activity time for per-run
+Reports filter alerts to the exact enabled training resources and use activity time for per-run
 candidates. Keep these outcomes distinct: request executed/rejected/failed; alert
 matched by resource/time only; matching run-specific evidence where actually
 available; no alert observed yet; and API unavailable or scan pending. The current
@@ -336,6 +380,12 @@ name before deletion.
 Changed inventory invalidates the approval hash. Deletion rereads ownership and
 removes the group plus the matching owned portal subscription reader assignment.
 Never place unrelated resources in this group.
+This also removes an enabled Drowsy Dragon container and its pull identity.
+Turning its option off does not remove resources in incremental mode; an
+observed retained instance is reported as a gap, not silently treated as stopped.
+NGINX site/plan/private-endpoint resources follow the same cleanup boundary.
+An optional NGINX plan can keep billing even before the site has been deployed;
+disabling its flag is not a cleanup operation.
 
 Subscription Defender plans and GitHub consent are retained. Purge-protected vaults
 retain deleted credentials for at least seven days and may block immediate name

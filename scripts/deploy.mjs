@@ -16,6 +16,16 @@ import { reconcileProtection } from "../shared/protection.mjs";
 import { collectReport, reportHtml } from "../shared/report.mjs";
 import { BlobEvidenceStore } from "../shared/evidence-store.mjs";
 import {
+  drowsyDragon,
+} from "../shared/drowsy-dragon.mjs";
+import { nginxProxy, nginxMode } from "../shared/nginx-proxy.mjs";
+import { imageEvidenceKey } from "../shared/image-evidence.mjs";
+import { buildNginxProxy, readNginxReceipt } from "./lib/nginx-proxy.mjs";
+import {
+  buildDrowsyDragon,
+  readDragonReceipt,
+} from "./lib/drowsy-dragon.mjs";
+import {
   synchronizeSource,
   verifySource,
   prepareDojoImage,
@@ -28,6 +38,8 @@ import {
   requireConfirmation,
   validateRelease,
   ownedReaderAssignments,
+  releaseParameters,
+  requireReleaseCostApproval,
 } from "./lib/lifecycle.mjs";
 
 const { values, positionals } = parseArgs({
@@ -79,9 +91,20 @@ async function main() {
           audit: true,
           config,
           names: resourceNames,
+          drowsyDragon: {
+            ...drowsyDragon,
+            enabled: config.drowsyDragonEnabled === true,
+            runtime: "Azure Container Instances; no public ingress or HTTP tests",
+          },
+          nginxProxy: {
+            ...nginxProxy,
+            ...nginxMode(config.nginxProxyMode),
+            enabled: config.nginxProxyEnabled === true,
+            runtime: "Separate private App Service; NGINX proxies only its own training dashboard",
+          },
           stages: allowed,
           warning:
-            "No Azure calls or writes. Two app plans, private endpoints, storage, logs, Key Vault and subscription-wide Defender charges require approval. GitHub tenant consent is interactive; not auto-granted.",
+            "No Azure calls or writes. Two default app plans, optional NGINX Proxy plan/private endpoint, storage, logs, Key Vault, optional Drowsy Dragon ACI and subscription-wide Defender charges require approval. GitHub tenant consent is interactive; not auto-granted.",
         },
         null,
         2,
@@ -149,6 +172,7 @@ async function main() {
       "Microsoft.Insights",
       "Microsoft.ManagedIdentity",
       "Microsoft.Security",
+      ...(config.drowsyDragonEnabled ? ["Microsoft.ContainerInstance"] : []),
     ];
     console.log(
       JSON.stringify(
@@ -243,6 +267,7 @@ async function main() {
       "Microsoft.Insights",
       "Microsoft.ManagedIdentity",
       "Microsoft.Security",
+      ...(config.drowsyDragonEnabled ? ["Microsoft.ContainerInstance"] : []),
     ])
       az(config, ["provider", "register", "--namespace", namespace, "--wait"]);
     if (!group) {
@@ -399,9 +424,27 @@ async function main() {
         scanHash: sha(await readFile(scanPath)),
       };
     }
+    if (config.drowsyDragonEnabled) {
+      release.images.drowsyDragon = await buildDrowsyDragon(
+        `${resourceNames.registry}.azurecr.io/drowsy-dragon:${tag}`,
+        join(output, `drowsy-dragon-${tag}`),
+      );
+    }
+    if (config.nginxProxyEnabled) {
+      release.images.nginxProxy = await buildNginxProxy(
+        `${resourceNames.registry}.azurecr.io/nginx-proxy:${tag}`,
+        join(output, `nginx-proxy-${tag}`),
+        config.nginxProxyMode,
+      );
+    }
     await verifySource(sourceHome, config.source);
     az(config, ["acr", "login", "--name", resourceNames.registry]);
     for (const entry of Object.values(release.images)) {
+      if (
+        entry.imageId &&
+        run("docker", ["image", "inspect", entry.image, "--format", "{{.Id}}"]) !== entry.imageId
+      )
+        throw new Error(`${entry.repository} image changed after scanning; rebuild before pushing`);
       run("docker", ["push", entry.image], { inherit: true });
       entry.digest = az(
         config,
@@ -439,6 +482,11 @@ async function main() {
         ),
       ),
     );
+    const imageReceipts = [];
+    if (config.drowsyDragonEnabled)
+      imageReceipts.push(await readDragonReceipt(release.images.drowsyDragon));
+    if (config.nginxProxyEnabled)
+      imageReceipts.push(await readNginxReceipt(release.images.nginxProxy));
     for (const entry of Object.values(release.images)) {
       if (sha(await readFile(entry.scanPath)) !== entry.scanHash)
         throw new Error("Scan artifact hash mismatch");
@@ -458,14 +506,7 @@ async function main() {
       if (manifest.digest !== entry.digest)
         throw new Error("Registry digest verification failed");
     }
-    const parameters = {
-      ...baseParameters(config),
-      portalDigest: release.images.portal.digest,
-      dojoDigest: release.images.dojo.digest,
-      sourceRepository: config.source.repository,
-      sourceRevision: config.source.revision,
-      protection: config.protection,
-    };
+    const parameters = releaseParameters(config, release);
     console.log(
       JSON.stringify(
         await deployTemplate("main", parameters, "what-if"),
@@ -484,12 +525,21 @@ async function main() {
       `deploy:${sha(JSON.stringify(release))}`,
       values.confirm,
     );
+    requireReleaseCostApproval(config, values["accept-costs"]);
     const coverage = await reconcileProtection(client, config.protection);
     if (coverage.some((item) => item.state !== "found"))
       throw new Error(
         "Required Defender coverage missing. Review doctor and run separately approved protection action.",
       );
     await ensureSecrets(client, resourceNames.vault, false);
+    if (imageReceipts.length) {
+      const store = new BlobEvidenceStore(resourceNames.storage, client.credential);
+      for (const receipt of imageReceipts)
+        await store.put(
+          imageEvidenceKey(receipt.demoId, receipt.imageDigest, receipt.hashes.scanJson),
+          receipt,
+        );
+    }
     await deployTemplate("main", parameters);
     await writeFile(
       join(output, `release-deployed-${Date.now()}.json`),
@@ -512,7 +562,7 @@ async function main() {
     } catch (error) {
       evidenceError = error.message;
     }
-    const report = await collectReport(config, client, runs);
+    const report = await collectReport(config, client, runs, store);
     if (evidenceError)
       report.checks.push({
         id: "Run evidence",

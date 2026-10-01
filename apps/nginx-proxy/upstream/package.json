@@ -1,0 +1,48 @@
+{
+  "name": "ninjapaws-cloud-security-dojo",
+  "version": "1.0.0",
+  "description": "🥷 Ninja Paws Cloud Security Dojo is a public Azure security training environment demonstrating how GitHub Advanced Security, Microsoft Defender for Cloud, Defender for DevOps, Azure Container Registry, and Azure App Service work together to detect, remediate, and validate container vulnerabilities.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ninjapaw/ninjapaws-cloud-security-dojo.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ninjapaw/ninjapaws-cloud-security-dojo/issues"
+  },
+  "homepage": "https://github.com/ninjapaw/ninjapaws-cloud-security-dojo#readme",
+  "main": "src/app.js",
+  "scripts": {
+    "start": "node src/app.js",
+    "dev": "node src/app.js",
+    "test": "node --check src/app.js && node --test tests/*.test.js",
+    "test:repo": "bash scripts/test.sh --skip-azure",
+    "test:e2e": "playwright test",
+    "report": "python3 -m http.server 8000 --directory output",
+    "dojo": "bash scripts/manage.sh",
+    "deploy:plan": "bash scripts/deploy.sh plan --environment dev --defaults",
+    "deploy:doctor": "bash scripts/deploy.sh doctor --environment dev --defaults",
+    "deploy:dev": "bash scripts/deploy.sh deploy --environment dev --defaults --yes"
+  },
+  "keywords": [
+    "security",
+    "azure",
+    "container",
+    "docker",
+    "training",
+    "education"
+  ],
+  "author": "Microsoft Corporation",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "express-rate-limit": "^7.5.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.1"
+  },
+  "engines": {
+    "node": "24.19.0",
+    "npm": "11.17.0"
+  },
+  "packageManager": "npm@11.17.0"
+}

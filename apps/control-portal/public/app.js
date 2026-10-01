@@ -81,9 +81,37 @@ function renderStory() {
     )
     .join("");
   select("#story-evidence").innerHTML =
-    `<dl><dt>Repository</dt><dd>${escape(report.source.repository)}</dd><dt>Revision</dt><dd><code>${escape(report.source.revision)}</code></dd><dt>Image digest</dt><dd><code>${escape(report.release?.dojoDigest || "Not deployed / not collected")}</code></dd><dt>Observed at</dt><dd>${escape(report.generatedAt)}</dd></dl>`;
+    `<dl><dt>WebGoat repository</dt><dd>${escape(report.source.repository)}</dd><dt>Revision</dt><dd><code>${escape(report.source.revision)}</code></dd><dt>Dojo image digest</dt><dd><code>${escape(report.release?.dojoDigest || "Not deployed / not collected")}</code></dd><dt>Drowsy Dragon base pin</dt><dd><code>${escape(report.drowsyDragon.baseImage)}</code></dd><dt>Drowsy Dragon observed image</dt><dd><code>${escape(report.drowsyDragon.observedImage || "Not collected")}</code></dd><dt>NGINX upstream source</dt><dd>${escape(report.nginxProxy.upstream.repository)}<br><code>${escape(report.nginxProxy.upstream.revision)}</code></dd><dt>NGINX requested mode</dt><dd>${escape(report.nginxProxy.requestedMode)} / ${escape(report.nginxProxy.expectedVersion)}</dd><dt>NGINX observed image</dt><dd><code>${escape(report.nginxProxy.observedImage || "Not collected")}</code></dd><dt>Observed at</dt><dd>${escape(report.generatedAt)}</dd></dl>`;
   select("#previous").disabled = stageIndex === 0;
   select("#next").disabled = stageIndex === stages.length - 1;
+}
+function renderImageEvidence(demo, prefix) {
+  select(`#${prefix}-overview`).innerHTML = table(
+    ["Demo", "Opt-in", "Deployment evidence", "Scan evidence"],
+    [[demo.title, demo.enabled ? "Enabled" : "Disabled", demo.state, demo.scanState]],
+    "No demo metadata returned.",
+  );
+  select(`#${prefix}-scan-status`).textContent = demo.scanState === "observed"
+    ? `Trivy snapshot ${demo.scannedAt}: ${demo.vulnerabilities.length} tracked-package findings; ${demo.imageFindingCount} total image findings. Bound to ${demo.imageDigest}. ${demo.targetCve ? `${demo.targetCve} association: ${demo.targetFindingObserved ? "reported" : "not returned"}. ` : ""}This is not a Defender assessment or proof of exploitability.`
+    : `Scan evidence: ${demo.scanState}. Missing evidence is not zero vulnerabilities. The optional demo must be built, scanned, released and collected first.`;
+  select(`#${prefix}-packages`).innerHTML = table(
+    ["Tracked package", "Installed version"],
+    demo.trackedPackages.map((name) => [
+      name,
+      demo.packages.find((pkg) => pkg.name === name)?.version || "Not collected",
+    ]),
+    "Package inventory has not been collected.",
+  );
+  select(`#${prefix}-findings`).innerHTML = table(
+    ["Finding", "Package", "Severity", "Installed", "Fixed version"],
+    demo.vulnerabilities.map((finding) => [
+      finding.id, finding.package, finding.severity,
+      finding.installedVersion, finding.fixedVersion || "Not reported",
+    ]),
+    demo.scanState === "observed"
+      ? "No findings for the tracked packages in this Trivy snapshot. This does not establish a vulnerability-free image."
+      : "No scan evidence collected; no clean result is implied.",
+  );
 }
 function render() {
   const live = report.mode === "live";
@@ -128,6 +156,20 @@ function render() {
     "No control readback yet. Plan enablement alone does not demonstrate protection.",
   );
   renderFindings();
+  renderImageEvidence(report.drowsyDragon, "dragon");
+  renderImageEvidence(report.nginxProxy, "proxy");
+  const proxy = report.nginxProxy;
+  select("#proxy-runtime").innerHTML = table(
+    ["Evidence", "Value"],
+    [
+      ["Requested mode / target version", `${proxy.requestedMode} / ${proxy.expectedVersion}`],
+      ["Target CVE (not a finding)", proxy.targetCve],
+      ["Startup evidence state", proxy.runtimeEvidenceState],
+      ["Reported binary / package", proxy.runtime ? `${proxy.runtime.binaryVersion} / ${proxy.runtime.packageVersion}` : "Not collected"],
+      ["Reported map/regex enabled", typeof proxy.runtime?.mapRegexEnabled === "boolean" ? String(proxy.runtime.mapRegexEnabled) : "Not collected"],
+    ],
+    "Runtime evidence has not been collected.",
+  );
   select("#alerts").innerHTML = table(
     ["Alert", "Severity", "Activity time"],
     report.alerts.map((alert) => [alert.title, alert.severity, alert.time]),
@@ -146,6 +188,8 @@ function render() {
     ...report.scope,
     dojoDigest: report.release?.dojoDigest || "Not collected",
     portalDigest: report.release?.portalDigest || "Not collected",
+    drowsyDragonObservedImage: report.release?.drowsyDragonObservedImage || "Not collected",
+    nginxProxyObservedImage: report.release?.nginxProxyObservedImage || "Not collected",
   })
     .map(([key, value]) => `<dt>${escape(key)}</dt><dd>${escape(value)}</dd>`)
     .join("");
@@ -297,7 +341,10 @@ async function compare() {
           item.schemaVersion !== 1 ||
           !Array.isArray(item.findings) ||
           !Array.isArray(item.alerts) ||
-          !item.scope,
+          !item.scope ||
+          ["drowsyDragon", "nginxProxy"].some((key) =>
+            item[key]?.scanState === "observed" && !Array.isArray(item[key].vulnerabilities),
+          ),
       )
     )
       throw new Error("Select version 1 dojo report snapshots");
@@ -307,8 +354,22 @@ async function compare() {
       throw new Error("Snapshots have different scopes; comparison refused");
     const unhealthy = (snapshot) =>
       snapshot.findings.filter((item) => item.state === "Unhealthy").length;
+    const imageFindings = (snapshot, key) =>
+      snapshot[key]?.scanState === "observed"
+        ? snapshot[key].vulnerabilities.length
+        : "not collected";
+    const imageReference = (snapshot, key) =>
+      snapshot[key]?.observedImage || "not collected";
     select("#comparison").textContent =
-      `Unhealthy assessments: ${unhealthy(snapshots[0])} -> ${unhealthy(snapshots[1])}. Alerts: ${snapshots[0].alerts.length} -> ${snapshots[1].alerts.length}. Source: ${snapshots[0].source?.revision || "unknown"} -> ${snapshots[1].source?.revision || "unknown"}. Counts reflect collection times, not proven remediation or prevention.`;
+      [
+        `Unhealthy assessments: ${unhealthy(snapshots[0])} -> ${unhealthy(snapshots[1])}.`,
+        `Alerts: ${snapshots[0].alerts.length} -> ${snapshots[1].alerts.length}.`,
+        `Source: ${snapshots[0].source?.revision || "unknown"} -> ${snapshots[1].source?.revision || "unknown"}.`,
+        ...[["drowsyDragon", "Drowsy Dragon"], ["nginxProxy", "NGINX Proxy"]].map(([key, title]) =>
+          `${title} tracked-package findings: ${imageFindings(snapshots[0], key)} -> ${imageFindings(snapshots[1], key)}. ${title} images: ${imageReference(snapshots[0], key)} -> ${imageReference(snapshots[1], key)}.`,
+        ),
+        "Counts reflect collection times, not proven remediation or prevention.",
+      ].join(" ");
   } catch (error) {
     select("#comparison").textContent = error.message;
   }

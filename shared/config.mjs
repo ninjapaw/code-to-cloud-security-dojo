@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { isIP } from "node:net";
 import { existsSync } from "node:fs";
+import { nginxMode } from "./nginx-proxy.mjs";
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const root = new URL("../", import.meta.url);
@@ -43,6 +44,17 @@ export function validateConfig(config, { offline = false } = {}) {
   }
   if (!["B2", "B3", "P1v3"].includes(config.appServiceSku))
     throw new Error("Unsupported App Service SKU");
+  if (
+    config.drowsyDragonEnabled !== undefined &&
+    typeof config.drowsyDragonEnabled !== "boolean"
+  )
+    throw new Error("drowsyDragonEnabled must be a boolean");
+  if (
+    config.nginxProxyEnabled !== undefined &&
+    typeof config.nginxProxyEnabled !== "boolean"
+  )
+    throw new Error("nginxProxyEnabled must be a boolean");
+  nginxMode(config.nginxProxyMode);
   if (
     !/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\.git$/.test(
       config.source?.repository,
@@ -87,6 +99,13 @@ export async function loadConfig(options) {
   );
 }
 
+export function booleanSetting(value, name, fallback = false) {
+  if (value === undefined) return fallback === true;
+  if (typeof value !== "string" || !/^(true|false)$/i.test(value))
+    throw new Error(`${name} must be true or false`);
+  return value.toLowerCase() === "true";
+}
+
 export function names(config) {
   const suffix = createHash("sha256")
     .update(
@@ -100,6 +119,8 @@ export function names(config) {
     storage: `dojo${suffix}`,
     portal: `dojo-${suffix}-portal`,
     dojo: `dojo-${suffix}-app`,
+    drowsyDragon: `dojo-${suffix}-dragon`,
+    nginxProxy: `dojo-${suffix}-proxy`,
   };
 }
 
@@ -129,7 +150,7 @@ export function confirmation(config, action) {
 }
 
 export function isLabHostname(host, appName) {
-  if (!/^dojo-[a-f0-9]{12}-(app|portal)$/.test(appName || "")) return false;
+  if (!/^dojo-[a-f0-9]{12}-(app|portal|proxy)$/.test(appName || "")) return false;
   return new RegExp(
     `^${appName}(?:-[a-z0-9]+(?:\\.[a-z0-9-]+)?)?\\.azurewebsites\\.net$`,
   ).test(host || "");

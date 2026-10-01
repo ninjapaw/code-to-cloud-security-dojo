@@ -133,6 +133,25 @@
               </div>
             </section>
             <section class="section">
+              <h2>Drowsy Dragon / Optional package demo</h2>
+              <p>
+                A pinned DHI .NET SDK image that inventories four OS packages
+                and sleeps. No HTTP endpoint or exploit test; actual findings
+                come from scanner evidence, not the image name.
+              </p>
+              <div id="dragon-overview"></div>
+            </section>
+            <section class="section">
+              <h2>NGINX Proxy / Original NinjaPaws image story</h2>
+              <p>
+                The original proxy and its dashboard, isolated in a separate
+                private App Service. Compare NGINX 1.30.3 with the map/regex
+                configuration against the 1.30.4 target-CVE remediation.
+                It never fronts WebGoat or this admin portal.
+              </p>
+              <div id="proxy-overview"></div>
+            </section>
+            <section class="section">
               <div class="section-heading">
                 <h2>Control coverage</h2>
                 <span class="muted">Readback, not assumptions</span>
@@ -174,6 +193,21 @@
               >
             </div>
             <div id="findings"></div>
+            <section class="section">
+              <h2>Drowsy Dragon package evidence</h2>
+              <p id="dragon-scan-status"></p>
+              <div id="dragon-packages"></div>
+              <h3>Tracked-package vulnerability findings</h3>
+              <div id="dragon-findings"></div>
+            </section>
+            <section class="section">
+              <h2>NGINX Proxy package and startup evidence</h2>
+              <p id="proxy-scan-status"></p>
+              <div id="proxy-runtime"></div>
+              <div id="proxy-packages"></div>
+              <h3>NGINX vulnerability findings</h3>
+              <div id="proxy-findings"></div>
+            </section>
             <section class="section">
               <h2>Target-scoped alerts</h2>
               <div id="alerts"></div>

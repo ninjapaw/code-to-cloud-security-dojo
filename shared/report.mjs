@@ -1,31 +1,38 @@
 import { names } from "./config.mjs";
 import { pricingMatches } from "./protection.mjs";
+import { nginxProxy, nginxMode } from "./nginx-proxy.mjs";
+import { collectNginxStory } from "./nginx-report.mjs";
+import {
+  drowsyDragon,
+  drowsyDragonEvidenceKey,
+  summarizeDragonReceipt,
+} from "./drowsy-dragon.mjs";
 
 export const story = [
   {
     id: "source",
     title: "01 / Source",
-    text: "WebGoat Java source is imported into this repository from a reviewed upstream commit. A source lock records its Git tree and content hash; image builds verify that snapshot. Native discovery still requires the GitHub connector and supported scanners that include the imported directory.",
+    text: "Compare three image stories: pinned WebGoat Java source; Drowsy Dragon's prebuilt DHI .NET SDK base; and the original NinjaPaws NGINX proxy imported from a reviewed commit. Both source snapshots are hash-verified. Native discovery still requires a healthy connector and supported scanners.",
   },
   {
     id: "build",
     title: "02 / Build & Assess",
-    text: "Build and scan both images before deployment. Dojo workload findings are expected training evidence, not a production exception. Deploy only the reviewed immutable digests.",
+    text: "Build and scan every enabled image before any push. Portal HIGH/CRITICAL findings block release. Drowsy Dragon and NGINX retain package versions, full Trivy JSON/SARIF and digest-bound receipts. NGINX 1.30.3 is the target-CVE affected mode; scanner association must still be observed, never assumed.",
   },
   {
     id: "posture",
     title: "03 / Cloud Posture",
-    text: "Independently read Defender plans, extensions and assessments. Enabled is not the same as assessed. Private Dojo workload is ineligible for serverless vulnerability assessment; use ACR image assessment.",
+    text: "Independently read Defender plans, extensions and assessments. Enabled is not assessed. Use ACR image assessment for all three training workloads. Trivy results are separate from Defender observations; no ACI sensor or native repository-to-runtime edge is promised. The legacy NGINX dashboard's coverage flags are configuration only.",
   },
   {
     id: "runtime",
     title: "04 / Runtime Validation",
-    text: "Run fixed authorized tests against the private lab target. An HTTP response confirms only delivery. Defender alerts can arrive hours later; time/resource matches remain candidates, not proven causation.",
+    text: "HTTP test buttons remain WebGoat-only. Drowsy Dragon sleeps without ingress. NGINX proxies only its own private dashboard, not WebGoat or the admin portal. Collect its binary/package and map/regex startup measurements through the fixed private evidence endpoint. None of these observations proves exploitation or Defender detection.",
   },
   {
     id: "remediate",
     title: "05 / Remediate & Compare",
-    text: "Pin a reviewed remediation commit, rebuild, rescan and compare exported snapshots. Preserve before/after digests and timestamps. Do not infer prevention from the existence of an alert.",
+    text: "Choose a reviewed WebGoat fix, a reviewed Drowsy Dragon base digest, or NGINX's target-CVE remediated mode (1.30.4 with map/regex removed). Rebuild, rescan and compare individual findings, package versions, configurations and immutable digests. Fixing one NGINX CVE is not a claim that the image has no other vulnerabilities.",
   },
   {
     id: "retire",
@@ -57,6 +64,33 @@ export function emptyReport(config, mode = "not-collected") {
     },
     source: config.source,
     release: {},
+    drowsyDragon: {
+      id: drowsyDragon.id,
+      title: drowsyDragon.title,
+      baseImage: drowsyDragon.baseImage,
+      trackedPackages: drowsyDragon.packages,
+      enabled: config.drowsyDragonEnabled === true,
+      state: config.drowsyDragonEnabled ? "not-collected" : "disabled",
+      scanState: "not-collected",
+      packages: [],
+      vulnerabilities: [],
+    },
+    nginxProxy: {
+      id: nginxProxy.id,
+      title: nginxProxy.title,
+      targetCve: nginxProxy.targetCve,
+      advisory: nginxProxy.advisory,
+      upstream: nginxProxy.source,
+      trackedPackages: nginxProxy.packages,
+      requestedMode: nginxMode(config.nginxProxyMode).mode,
+      expectedVersion: nginxMode(config.nginxProxyMode).version,
+      enabled: config.nginxProxyEnabled === true,
+      state: config.nginxProxyEnabled ? "not-collected" : "disabled",
+      runtimeEvidenceState: "not-collected",
+      scanState: "not-collected",
+      packages: [],
+      vulnerabilities: [],
+    },
     checks: [],
     resources: [],
     findings: [],
@@ -68,6 +102,8 @@ export function emptyReport(config, mode = "not-collected") {
       "GitHub connector consent, repository discovery and native scanner coverage require independent verification.",
       "Private Dojo workload serverless vulnerability assessment is not applicable; inspect ACR assessments.",
       "Costs are not estimated: review regional pricing and subscription-wide Defender charges before applying.",
+      "Drowsy Dragon is an image/package assessment demo, not an HTTP exploit lab. Trivy snapshots do not prove Defender assessment, exploitability or runtime protection.",
+      "NGINX runtime evidence is a container-reported startup snapshot, not a new binary probe. Private connectivity is required; configured vulnerability badges and requested coverage are not observed findings.",
       "No live collection has been performed.",
     ],
   };
@@ -101,11 +137,12 @@ export function candidateAlerts(alerts, run) {
   );
 }
 
-export async function collectReport(config, client, runs = []) {
+export async function collectReport(config, client, runs = [], evidenceStore, { fetcher = fetch } = {}) {
   const report = emptyReport(config, "live");
   report.limitations.pop();
   const group = `${client.scope}/resourceGroups/${config.resourceGroup}`;
   const target = `${group}/providers/Microsoft.Web/sites/${names(config).dojo}`;
+  const dragonTarget = `${group}/providers/Microsoft.ContainerInstance/containerGroups/${names(config).drowsyDragon}`;
   const collect = async (id, callback) => {
     try {
       await callback();
@@ -174,11 +211,96 @@ export async function collectReport(config, client, runs = []) {
       });
     });
   }
+  const dragon = report.drowsyDragon;
+  const dragonPresent = report.resources.some(
+    (resource) => resource.id?.toLowerCase() === dragonTarget.toLowerCase(),
+  );
+  if (dragon.enabled || dragonPresent) {
+    dragon.state = "unknown";
+    dragon.scanState = "unknown";
+    let digest;
+    let scanHash;
+    await collect("Drowsy Dragon runtime", async () => {
+      const instance = await client.request(
+        `${dragonTarget}?api-version=2023-05-01`,
+      );
+      const properties = instance.properties || {};
+      const containers = properties.containers || [];
+      const container = containers.find((item) => item.name === drowsyDragon.id);
+      const image = container?.properties?.image;
+      const prefix = `${names(config).registry}.azurecr.io/drowsy-dragon@`;
+      if (
+        typeof image === "string" &&
+        image.startsWith(prefix) &&
+        /^sha256:[a-f0-9]{64}$/.test(image.slice(prefix.length))
+      )
+        digest = image.slice(prefix.length);
+      scanHash = instance.tags?.["dojo.scanHash"];
+      dragon.observedImage = image || "Not returned";
+      dragon.provisioningState = properties.provisioningState || "Not returned";
+      dragon.runtimeState = container?.properties?.instanceView?.currentState?.state || "Not returned";
+      dragon.groupState = properties.instanceView?.state || "Not returned";
+      dragon.noIngressObserved = !properties.ipAddress &&
+        containers.length === 1 && !container?.properties?.ports?.length;
+      report.release.drowsyDragonObservedImage = dragon.observedImage;
+      const matched = digest &&
+        (!config.drowsyDragonDigest || digest === config.drowsyDragonDigest);
+      dragon.state = !dragon.enabled ? "retained" :
+        matched && dragon.noIngressObserved &&
+        dragon.provisioningState === "Succeeded" &&
+        dragon.runtimeState === "Running" && dragon.groupState === "Running"
+          ? "observed" : "gap";
+      report.checks.push({
+        id: "Drowsy Dragon runtime",
+        state: dragon.state === "observed" ? "observed" : "gap",
+        detail: !dragon.enabled
+          ? "Disabled in configuration but still deployed. Incremental releases do not delete it; use approved lab cleanup."
+          : `Provisioning: ${dragon.provisioningState}; group: ${dragon.groupState}; container: ${dragon.runtimeState}; no ingress observed: ${dragon.noIngressObserved}; image: ${dragon.observedImage}. Runtime state is not vulnerability or detection evidence.`,
+      });
+    });
+    await collect("Drowsy Dragon scan evidence", async () => {
+      if (!digest || !evidenceStore) {
+        dragon.scanState = "pending";
+        report.checks.push({
+          id: "Drowsy Dragon scan evidence",
+          state: "pending",
+          detail: "A matching observed ACR image and release evidence store are required. No vulnerability result is inferred.",
+        });
+        return;
+      }
+      const receipt = await evidenceStore.get(
+        drowsyDragonEvidenceKey(digest, scanHash),
+      );
+      if (!receipt) {
+        dragon.scanState = "pending";
+        report.checks.push({
+          id: "Drowsy Dragon scan evidence",
+          state: "pending",
+          detail: "The deployed image's scan receipt has not been collected. Missing evidence is not zero vulnerabilities.",
+        });
+        return;
+      }
+      Object.assign(dragon, summarizeDragonReceipt(receipt, digest, scanHash));
+      dragon.scanState = "observed";
+      report.checks.push({
+        id: "Drowsy Dragon scan evidence",
+        state: "observed",
+        detail: `Trivy snapshot ${dragon.scannedAt}: ${dragon.vulnerabilities.length} findings across the four tracked packages; ${dragon.imageFindingCount} total image findings. Matched image digest and evidence hashes. Defender assessment remains separate.`,
+      });
+    });
+  }
+  const nginxTarget = await collectNginxStory({
+    config, client, report, collect, evidenceStore, fetcher,
+  });
   await collect("Alerts", async () => {
     const alerts = await client.list(
       `${client.scope}/providers/Microsoft.Security/alerts?api-version=2022-01-01`,
     );
-    const scoped = alerts.filter((alert) => alertTargets(alert, target));
+    const scoped = alerts.filter((alert) =>
+      alertTargets(alert, target) ||
+      ((dragon.enabled || dragonPresent) && alertTargets(alert, dragonTarget)) ||
+      (nginxTarget && alertTargets(alert, nginxTarget)),
+    );
     report.alerts = scoped.map((alert) => ({
       id: alert.name,
       title: alert.properties?.alertDisplayName,
@@ -210,6 +332,16 @@ export async function collectReport(config, client, runs = []) {
   return report;
 }
 
+function imageStoryHtml(demo) {
+  const source = demo.baseImage
+    ? `<p>Approved base image: <code>${escapeHtml(demo.baseImage)}</code></p>`
+    : `<p>Imported source: ${escapeHtml(demo.upstream.repository)} / <code>${escapeHtml(demo.upstream.revision)}</code></p>`;
+  const target = demo.targetCve
+    ? `<p>Target CVE: ${escapeHtml(demo.targetCve)}. Requested mode: ${escapeHtml(demo.requestedMode)} / ${escapeHtml(demo.expectedVersion)}. Trivy association: ${demo.scanState === "observed" ? demo.targetFindingObserved ? "reported" : "not returned" : "not collected"}.</p><p>Startup evidence: ${escapeHtml(demo.runtimeEvidenceState)}. Binary: ${escapeHtml(demo.runtime?.binaryVersion || "Not collected")}. Reported map/regex: ${typeof demo.runtime?.mapRegexEnabled === "boolean" ? String(demo.runtime.mapRegexEnabled) : "Not collected"}. A target-CVE fix does not establish a vulnerability-free image.</p>`
+    : "";
+  return `<h2>${escapeHtml(demo.title)} / Package Vulnerability Demo</h2><p>Deployment: ${escapeHtml(demo.state)}. Trivy evidence: ${escapeHtml(demo.scanState)}. ${demo.scanState === "observed" ? `${demo.vulnerabilities.length} tracked-package findings in the snapshot at ${escapeHtml(demo.scannedAt)}; this is not a Defender assessment or proof of exploitability.` : "Package findings have not been collected; no clean result is implied."}</p>${source}${target}<p>Observed runtime image: <code>${escapeHtml(demo.observedImage || "Not collected")}</code></p><table><tr><th>Tracked package</th><th>Installed version</th></tr>${demo.trackedPackages.map((name) => `<tr><td>${escapeHtml(name)}</td><td>${escapeHtml(demo.packages.find((pkg) => pkg.name === name)?.version || "Not collected")}</td></tr>`).join("")}</table>`;
+}
+
 export function reportHtml(report) {
   const rows = report.checks
     .map(
@@ -220,5 +352,7 @@ export function reportHtml(report) {
   const gaps = report.checks.filter((check) =>
     ["gap", "unknown", "pending"].includes(check.state),
   ).length;
-  return `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Code to Cloud Security Dojo / Executive Report</title><style>body{font:16px 'Segoe UI',sans-serif;max-width:1100px;margin:32px auto;padding:24px;color:#201f1e}h1{font-size:30px}table{border-collapse:collapse;width:100%;table-layout:fixed}td,th{padding:12px;border-bottom:1px solid #ccc;text-align:left;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}small{color:#555}@media print{body{margin:0;padding:0}tr{break-inside:avoid}}</style><h1>Code to Cloud Security Dojo Review</h1><p>Executive evidence report / ${escapeHtml(report.generatedAt)}</p><p><strong>Outcome: ${report.mode !== "live" ? "Not live-verified" : gaps ? "Coverage gaps or verification pending" : "Observed configuration only; efficacy not proven"}</strong></p><p>${gaps} unresolved checks. ${report.findings.length} assessments. ${report.alerts.length} target alerts. ${report.runs.length} recorded test runs.</p><h2>Scope & Accountability</h2><pre>${escapeHtml(JSON.stringify(report.scope, null, 2))}</pre><h2>Coverage & Status</h2><table><tr><th>Control</th><th>Status</th><th>Evidence</th></tr>${rows}</table><h2>Executive Actions</h2><ol><li>Resolve unknown and missing coverage before presenting this lab as protected.</li><li>Review high-severity findings; compare remediation snapshots and immutable image digests.</li><li>Confirm recurring subscription charges and export evidence before teardown.</li></ol><h2>Limitations</h2><ul>${report.limitations.map((value) => `<li>${escapeHtml(value)}</li>`).join("")}</ul><h2>Technical Evidence</h2><pre>${escapeHtml(JSON.stringify({ source: report.source, release: report.release, resources: report.resources, findings: report.findings, alerts: report.alerts, runs: report.runs }, null, 2))}</pre><small>Independent training environment. Not a compliance certification or a production security assurance.</small></html>`;
+  const imageSections = [report.drowsyDragon, report.nginxProxy]
+    .filter(Boolean).map(imageStoryHtml).join("");
+  return `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Code to Cloud Security Dojo / Executive Report</title><style>body{font:16px 'Segoe UI',sans-serif;max-width:1100px;margin:32px auto;padding:24px;color:#201f1e}h1{font-size:30px}table{border-collapse:collapse;width:100%;table-layout:fixed}td,th{padding:12px;border-bottom:1px solid #ccc;text-align:left;overflow-wrap:anywhere}pre,code{white-space:pre-wrap;overflow-wrap:anywhere}small{color:#555}@media print{body{margin:0;padding:0}tr{break-inside:avoid}}</style><h1>Code to Cloud Security Dojo Review</h1><p>Executive evidence report / ${escapeHtml(report.generatedAt)}</p><p><strong>Outcome: ${report.mode !== "live" ? "Not live-verified" : gaps ? "Coverage gaps or verification pending" : "Observed configuration only; efficacy not proven"}</strong></p><p>${gaps} unresolved checks. ${report.findings.length} assessments. ${report.alerts.length} target alerts. ${report.runs.length} recorded test runs.</p><h2>Scope & Accountability</h2><pre>${escapeHtml(JSON.stringify(report.scope, null, 2))}</pre>${imageSections}<h2>Coverage & Status</h2><table><tr><th>Control</th><th>Status</th><th>Evidence</th></tr>${rows}</table><h2>Executive Actions</h2><ol><li>Resolve unknown and missing coverage before presenting this lab as protected.</li><li>Review high-severity findings; compare remediation snapshots and immutable image digests.</li><li>Confirm recurring subscription charges and export evidence before teardown.</li></ol><h2>Limitations</h2><ul>${report.limitations.map((value) => `<li>${escapeHtml(value)}</li>`).join("")}</ul><h2>Technical Evidence</h2><pre>${escapeHtml(JSON.stringify({ source: report.source, release: report.release, drowsyDragon: report.drowsyDragon, nginxProxy: report.nginxProxy, resources: report.resources, findings: report.findings, alerts: report.alerts, runs: report.runs }, null, 2))}</pre><small>Independent training environment. Not a compliance certification or a production security assurance.</small></html>`;
 }

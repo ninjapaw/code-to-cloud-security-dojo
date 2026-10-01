@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import spawn from "cross-spawn";
 import { fileURLToPath } from "node:url";
 import { root, names, confirmation } from "../../shared/config.mjs";
+import { drowsyDragon } from "../../shared/drowsy-dragon.mjs";
+import { nginxProxy, nginxMode } from "../../shared/nginx-proxy.mjs";
 
 export function run(
   command,
@@ -78,6 +80,8 @@ export function baseParameters(config) {
     storageName: resourceNames.storage,
     portalName: resourceNames.portal,
     dojoName: resourceNames.dojo,
+    nginxProxyEnabled: config.nginxProxyEnabled === true,
+    nginxProxyName: resourceNames.nginxProxy,
   };
 }
 
@@ -98,12 +102,84 @@ export function validateRelease(config, release) {
     release.source.repository !== config.source.repository
   )
     throw new Error("Release was built for a different configuration/source");
-  for (const image of ["dojo", "portal"]) {
+  const requiredImages = [
+    "dojo",
+    "portal",
+    ...(config.drowsyDragonEnabled ? ["drowsyDragon"] : []),
+    ...(config.nginxProxyEnabled ? ["nginxProxy"] : []),
+  ];
+  if (!config.drowsyDragonEnabled && release.images?.drowsyDragon)
+    throw new Error("Drowsy Dragon is not enabled for this release");
+  if (!config.nginxProxyEnabled && release.images?.nginxProxy)
+    throw new Error("NGINX Proxy is not enabled for this release");
+  for (const image of requiredImages) {
     if (
       !/^sha256:[a-f0-9]{64}$/.test(release.images?.[image]?.digest) ||
       !/^[a-f0-9]{64}$/.test(release.images[image].scanHash)
     )
       throw new Error(`Missing digest or scan evidence: ${image}`);
   }
+  if (config.drowsyDragonEnabled) {
+    const entry = release.images.drowsyDragon;
+    if (
+      entry.repository !== drowsyDragon.id ||
+      entry.baseImage !== drowsyDragon.baseImage ||
+      !entry.image?.startsWith(`${names(config).registry}.azurecr.io/drowsy-dragon:`) ||
+      !/^sha256:[a-f0-9]{64}$/.test(entry.imageId || "") ||
+      !/^[a-f0-9]{40}$/.test(entry.sourceRevision || "") ||
+      !Number.isFinite(Date.parse(entry.scannedAt)) ||
+      ["dockerfileHash", "inventoryHash", "scanJsonHash"].some(
+        (key) => !/^[a-f0-9]{64}$/.test(entry[key] || ""),
+      ) ||
+      ["scanPath", "inventoryPath", "scanJsonPath"].some(
+        (key) => typeof entry[key] !== "string" || !entry[key],
+      )
+    )
+      throw new Error("Drowsy Dragon requires pinned provenance and package/scan evidence");
+  }
+  if (config.nginxProxyEnabled) {
+    const entry = release.images.nginxProxy;
+    if (
+      entry.repository !== nginxProxy.id ||
+      entry.mode !== nginxMode(config.nginxProxyMode).mode ||
+      entry.dockerfileHash !== nginxProxy.dockerfileHash ||
+      entry.sourceSnapshotHash !== nginxProxy.source.sha256 ||
+      !entry.image?.startsWith(`${names(config).registry}.azurecr.io/nginx-proxy:`) ||
+      !/^sha256:[a-f0-9]{64}$/.test(entry.imageId || "") ||
+      !/^[a-f0-9]{40}$/.test(entry.sourceRevision || "") ||
+      !Number.isFinite(Date.parse(entry.scannedAt)) ||
+      ["sourceLockHash", "inventoryHash", "scanJsonHash"].some(
+        (key) => !/^[a-f0-9]{64}$/.test(entry[key] || ""),
+      ) ||
+      ["sourceLockPath", "scanPath", "inventoryPath", "scanJsonPath"].some(
+        (key) => typeof entry[key] !== "string" || !entry[key],
+      )
+    )
+      throw new Error("NGINX Proxy requires its approved mode, source pin and package/scan evidence");
+  }
   return release;
+}
+
+export function releaseParameters(config, release) {
+  validateRelease(config, release);
+  return {
+    ...baseParameters(config),
+    portalDigest: release.images.portal.digest,
+    dojoDigest: release.images.dojo.digest,
+    sourceRepository: config.source.repository,
+    sourceRevision: config.source.revision,
+    protection: config.protection,
+    drowsyDragonEnabled: config.drowsyDragonEnabled === true,
+    drowsyDragonName: names(config).drowsyDragon,
+    drowsyDragonDigest: release.images.drowsyDragon?.digest || "",
+    drowsyDragonScanHash: release.images.drowsyDragon?.scanJsonHash || "",
+    nginxProxyMode: nginxMode(config.nginxProxyMode).mode,
+    nginxProxyDigest: release.images.nginxProxy?.digest || "",
+    nginxProxyScanHash: release.images.nginxProxy?.scanJsonHash || "",
+  };
+}
+
+export function requireReleaseCostApproval(config, accepted) {
+  if ((config.drowsyDragonEnabled || config.nginxProxyEnabled) && accepted !== true)
+    throw new Error("Optional image demos incur recurring Azure charges; deploy requires --accept-costs");
 }
