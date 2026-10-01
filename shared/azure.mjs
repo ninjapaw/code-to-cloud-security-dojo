@@ -10,7 +10,6 @@ export class AzureClient {
             clientId: process.env.AZURE_CLIENT_ID,
           })
         : new AzureCliCredential({
-            tenantId: config.tenantId,
             subscription: config.subscriptionId,
           }));
     this.fetcher = fetcher;
