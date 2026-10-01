@@ -55,7 +55,7 @@ resource worker 'Microsoft.Web/sites@2024-11-01' = {
       linuxFxVersion: 'DOCKER|${registry.properties.loginServer}/secret-bootstrap@${imageDigest}'
       acrUseManagedIdentityCreds: true
       acrUserManagedIdentityID: identity.properties.clientId
-      alwaysOn: false
+      alwaysOn: true
       ftpsState: 'Disabled'
       minTlsVersion: '1.2'
       scmMinTlsVersion: '1.2'
@@ -80,6 +80,11 @@ resource scmPolicy 'Microsoft.Web/sites/basicPublishingCredentialsPolicies@2024-
   parent: worker
   name: 'scm'
   properties: { allow: false }
+}
+resource logs 'Microsoft.Web/sites/config@2024-11-01' = {
+  parent: worker
+  name: 'logs'
+  properties: { applicationLogs: { fileSystem: { level: 'Information' } } }
 }
 resource diagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
   scope: worker

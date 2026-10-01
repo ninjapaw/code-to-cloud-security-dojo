@@ -135,6 +135,8 @@ test("temporary credential worker is private, VNet-integrated and vault-scoped",
   assert.match(worker, /publicNetworkAccess: 'Disabled'/);
   assert.match(worker, /virtualNetworkSubnetId: subnet\.id/);
   assert.match(worker, /vnetRouteAllEnabled: true/);
+  assert.match(worker, /alwaysOn: true/);
+  assert.match(worker, /applicationLogs: \{ fileSystem: \{ level: 'Information' \} \}/);
   assert.match(
     worker,
     /guid\(vault\.id, identity\.id, 'KeyVaultSecretsOfficer'\)[\s\S]*?scope: vault[\s\S]*?b86a8fe4-44ce-4948-aee5-eccb2c155cd7/,

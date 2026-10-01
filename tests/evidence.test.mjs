@@ -101,6 +101,16 @@ test("Azure pagination rejects token exfiltration and loops", async () => {
   });
   await assert.rejects(client.list("/subscriptions/test/items"), /pagination/);
 });
+test("ARM empty DELETE responses do not require JSON bodies", async () => {
+  const client = new AzureClient(
+    { subscriptionId: "test" },
+    {
+      credential: { getToken: async () => ({ token: "test-only" }) },
+      fetcher: async () => new Response(null, { status: 200 }),
+    },
+  );
+  assert.equal(await client.request("/subscriptions/test/resources/example", { method: "DELETE" }), null);
+});
 test("collector preserves unknown read failures and reports observed image digests", async () => {
   const config = {
     labId: "training",

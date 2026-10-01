@@ -38,7 +38,9 @@ export class AzureClient {
         body: body === undefined ? undefined : JSON.stringify(body),
       });
       if (response.ok)
-        return [202, 204].includes(response.status) ? null : response.json();
+        return method === "DELETE" || [202, 204].includes(response.status)
+          ? null
+          : response.json();
       if (
         (response.status === 429 || response.status >= 500) &&
         attempt < 2 &&
