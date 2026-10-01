@@ -113,7 +113,8 @@ async function cleanup() {
         throw new Error("Bootstrap identity retains a scoped role assignment");
     }
   }
-  await remove(workerPath, "2024-11-01");
+  if (await resource(workerPath, "2024-11-01"))
+    az(config, ["webapp", "delete", "--resource-group", config.resourceGroup, "--name", workerName, "--keep-empty-plan"]);
   if (identity) {
     for (let attempt = 0; attempt < 30; attempt++) {
       if (!(await resource(workerPath, "2024-11-01"))) break;
@@ -225,6 +226,7 @@ async function main() {
     labId: config.labId,
     location: config.location,
     portalName: resourceNames.portal,
+    appServiceSku: config.appServiceSku,
     registryName: resourceNames.registry,
     vaultName: resourceNames.vault,
     imageDigest: manifest.digest,
@@ -271,7 +273,7 @@ async function main() {
     changes.some(
       (item) =>
         item.changeType !== "Create" ||
-        (![workerPath.toLowerCase(), identityPath.toLowerCase()].some((path) =>
+        (![workerPath.toLowerCase(), identityPath.toLowerCase(), `${groupPath}/providers/Microsoft.Web/serverFarms/${resourceNames.portal}-plan`.toLowerCase()].some((path) =>
           item.resourceId.toLowerCase().startsWith(path),
         ) &&
           ![vaultPath.toLowerCase(), registryPath.toLowerCase()].some((path) =>

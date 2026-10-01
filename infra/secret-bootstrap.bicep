@@ -1,6 +1,8 @@
 param labId string
 param location string = resourceGroup().location
 param portalName string
+@allowed(['B2', 'B3', 'P1v3'])
+param appServiceSku string
 param registryName string
 param vaultName string
 @minLength(71)
@@ -12,7 +14,14 @@ var name = '${portalName}-bootstrap'
 var tags = { 'dojo.labId': labId, 'dojo.managedBy': 'code-to-cloud-security-dojo' }
 resource registry 'Microsoft.ContainerRegistry/registries@2025-04-01' existing = { name: registryName }
 resource vault 'Microsoft.KeyVault/vaults@2024-11-01' existing = { name: vaultName }
-resource plan 'Microsoft.Web/serverfarms@2024-11-01' existing = { name: '${portalName}-plan' }
+resource plan 'Microsoft.Web/serverfarms@2024-11-01' = {
+  name: '${portalName}-plan'
+  location: location
+  tags: tags
+  kind: 'linux'
+  sku: { name: appServiceSku, capacity: 1 }
+  properties: { reserved: true }
+}
 resource network 'Microsoft.Network/virtualNetworks@2024-05-01' existing = { name: '${labId}-vnet' }
 resource subnet 'Microsoft.Network/virtualNetworks/subnets@2024-05-01' existing = { parent: network, name: 'portal' }
 resource workspace 'Microsoft.OperationalInsights/workspaces@2023-09-01' existing = { name: '${labId}-logs' }

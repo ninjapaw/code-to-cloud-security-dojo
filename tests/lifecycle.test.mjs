@@ -132,7 +132,9 @@ test("temporary credential worker is private, VNet-integrated and vault-scoped",
     new URL("../infra/secret-bootstrap.bicep", import.meta.url),
     "utf8",
   );
+  const lifecycle = await readFile(new URL("../scripts/bootstrap-secrets.mjs", import.meta.url), "utf8");
   assert.match(worker, /publicNetworkAccess: 'Disabled'/);
+  assert.match(worker, /resource plan 'Microsoft\.Web\/serverfarms@2024-11-01' = \{[\s\S]*?name: '\$\{portalName\}-plan'[\s\S]*?sku: \{ name: appServiceSku, capacity: 1 \}/);
   assert.match(worker, /virtualNetworkSubnetId: subnet\.id/);
   assert.match(worker, /vnetRouteAllEnabled: true/);
   assert.match(worker, /alwaysOn: true/);
@@ -147,6 +149,7 @@ test("temporary credential worker is private, VNet-integrated and vault-scoped",
   );
   assert.match(worker, /scmIpSecurityRestrictionsDefaultAction: 'Deny'/);
   assert.doesNotMatch(worker, /(?:adminIpv4Address|clientSecret|password):/);
+  assert.match(lifecycle, /"webapp", "delete"[\s\S]*?"--keep-empty-plan"/);
 });
 test("private App Service workloads route through an Internet-denied subnet", async () => {
   const foundation = await readFile(
