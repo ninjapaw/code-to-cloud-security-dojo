@@ -5,6 +5,15 @@ on:
   push:
     branches: [dev, main]
   workflow_dispatch:
+    inputs:
+      drowsy-dragon:
+        description: Build and scan the opt-in Drowsy Dragon image (DHI credentials required)
+        type: boolean
+        default: false
+      nginx-proxy:
+        description: Build and scan both original NGINX Proxy modes (no Azure deployment)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -14,6 +23,77 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  nginx-proxy:
+    if: github.event_name == 'workflow_dispatch' && inputs.nginx-proxy
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [vulnerable, remediated]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - uses: aquasecurity/setup-trivy@e6c2c5e321ed9123bda567646e2f96565e34abe1 # v0.2.4
+        with:
+          version: v0.69.3
+      - name: Build and scan the selected NGINX mode
+        env:
+          NGINX_MODE: ${{ matrix.mode }}
+        run: npm run image:build:nginx -- --mode "$NGINX_MODE"
+      - name: Retain NGINX source, package and scan evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: nginx-proxy-${{ matrix.mode }}-evidence
+          path: |
+            output/images/nginx-proxy/
+            apps/nginx-proxy/source-lock.json
+
+  drowsy-dragon:
+    if: github.event_name == 'workflow_dispatch' && inputs.drowsy-dragon
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - uses: aquasecurity/setup-trivy@e6c2c5e321ed9123bda567646e2f96565e34abe1 # v0.2.4
+        with:
+          version: v0.69.3
+      - name: Sign in to the DHI source registry
+        id: dhi-login
+        env:
+          DHI_USERNAME: ${{ secrets.DHI_USERNAME }}
+          DHI_TOKEN: ${{ secrets.DHI_TOKEN }}
+        run: |
+          set -euo pipefail
+          : "${DHI_USERNAME:?Set the DHI_USERNAME repository secret}"
+          : "${DHI_TOKEN:?Set the DHI_TOKEN repository secret}"
+          printf '%s' "$DHI_TOKEN" | docker login dhi.io --username "$DHI_USERNAME" --password-stdin
+      - name: Build and record package and vulnerability evidence
+        run: npm run image:build:dragon -- --tag drowsy-dragon:scan
+      - name: Retain Drowsy Dragon evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: drowsy-dragon-evidence
+          path: output/images/drowsy-dragon/
+      - name: Sign out of the source registry
+        if: always() && steps.dhi-login.outcome == 'success'
+        run: docker logout dhi.io
+
   validate-and-scan:
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -28,6 +108,7 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run source:check
+      - run: npm run image:check:nginx
       - run: npm run check:public
       - run: npm run plan
       - name: Compile infrastructure and lint shell entrypoints
