@@ -23,5 +23,8 @@ secrets
 apps/dojo
 tests
 scripts
+!scripts/
+scripts/*
+!scripts/secret-bootstrap.mjs
 .github
 README.md

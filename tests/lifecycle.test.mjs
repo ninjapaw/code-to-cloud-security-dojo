@@ -8,6 +8,7 @@ import {
   createDeploymentStatus,
   renderDeploymentStatus,
 } from "../scripts/lib/deployment-status.mjs";
+import { ensureBootstrapSecrets } from "../scripts/secret-bootstrap.mjs";
 import {
   configHash,
   requireConfirmation,
@@ -99,6 +100,51 @@ test("live deployment status persists progress, failures, retries and escaped HT
   } finally {
     await rm(output, { recursive: true, force: true });
   }
+});
+test("private credential bootstrap is idempotent and refuses implicit rotation", async () => {
+  const values = new Map();
+  const secrets = {
+    async getSecret(name) {
+      if (!values.has(name))
+        throw Object.assign(new Error("Missing"), { statusCode: 404 });
+      return values.get(name);
+    },
+    async setSecret(name, value, options) {
+      assert.equal(value.length >= 43, true);
+      assert.equal(options.tags.purpose, name);
+      values.set(name, {
+        value,
+        properties: { enabled: true, expiresOn: options.expiresOn },
+      });
+    },
+  };
+  await ensureBootstrapSecrets(secrets);
+  assert.deepEqual([...values.keys()], ["admin-password", "session-key"]);
+  const original = values.get("admin-password").value;
+  await ensureBootstrapSecrets(secrets);
+  assert.equal(values.get("admin-password").value, original);
+  values.get("admin-password").properties.enabled = false;
+  await assert.rejects(ensureBootstrapSecrets(secrets), /explicit rotation/);
+  assert.equal(values.get("admin-password").value, original);
+});
+test("temporary credential worker is private, VNet-integrated and vault-scoped", async () => {
+  const worker = await readFile(
+    new URL("../infra/secret-bootstrap.bicep", import.meta.url),
+    "utf8",
+  );
+  assert.match(worker, /publicNetworkAccess: 'Disabled'/);
+  assert.match(worker, /virtualNetworkSubnetId: subnet\.id/);
+  assert.match(worker, /vnetRouteAllEnabled: true/);
+  assert.match(
+    worker,
+    /guid\(vault\.id, identity\.id, 'KeyVaultSecretsOfficer'\)[\s\S]*?scope: vault[\s\S]*?b86a8fe4-44ce-4948-aee5-eccb2c155cd7/,
+  );
+  assert.match(
+    worker,
+    /guid\(registry\.id, identity\.id, 'AcrPull'\)[\s\S]*?scope: registry[\s\S]*?7f951dda-4ed3-4680-a7ca-43fe172d538d/,
+  );
+  assert.match(worker, /scmIpSecurityRestrictionsDefaultAction: 'Deny'/);
+  assert.doesNotMatch(worker, /(?:adminIpv4Address|clientSecret|password):/);
 });
 test("private App Service workloads route through an Internet-denied subnet", async () => {
   const foundation = await readFile(

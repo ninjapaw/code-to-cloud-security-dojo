@@ -13,6 +13,7 @@ const stages = [
   ["report", "Evidence report"],
 ];
 const additionalStages = {
+  bootstrap: "Private credential bootstrap",
   repair: "Repair release",
   rotate: "Credential rotation",
   inventory: "Removal inventory",

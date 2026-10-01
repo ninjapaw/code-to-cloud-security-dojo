@@ -608,7 +608,7 @@ async function main() {
       throw new Error(
         "Required Defender coverage missing. Review doctor and run separately approved protection action.",
       );
-    await ensureSecrets(client, resourceNames.vault, false);
+    await verifyPrivateCredentials(client, config, output, resourceNames);
     if (imageReceipts.length) {
       await updateStatus(
         "Recording optional image evidence in private Blob storage",
@@ -794,6 +794,84 @@ async function ensureSecrets(client, vaultName, rotate) {
   console.log(
     "Credentials are managed in Key Vault. Retrieve admin-password through an authorized Key Vault session; no secret was printed or saved locally. Rotate within 90 days.",
   );
+}
+
+async function verifyPrivateCredentials(client, config, output, resourceNames) {
+  let proof;
+  try {
+    proof = JSON.parse(
+      await readFile(join(output, "private-bootstrap-proof.json"), "utf8"),
+    );
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    await ensureSecrets(client, resourceNames.vault, false);
+    return;
+  }
+  if (
+    proof.codeRevision !== run("git", ["rev-parse", "HEAD"]) ||
+    proof.configHash !== configHash(config) ||
+    !/^[a-f0-9-]{36}$/.test(proof.runId || "") ||
+    !Number.isFinite(Date.parse(proof.observedAt)) ||
+    Date.now() - Date.parse(proof.observedAt) > 60 * 60 * 1000 ||
+    Date.parse(proof.observedAt) > Date.now()
+  )
+    throw new Error(
+      "Private vault bootstrap proof is stale or does not match this release",
+    );
+  const groupPath = `${client.scope}/resourceGroups/${config.resourceGroup}`;
+  const workerPath = `${groupPath}/providers/Microsoft.Web/sites/${resourceNames.portal}-bootstrap`;
+  const identityPath = `${groupPath}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/${resourceNames.portal}-bootstrap-identity`;
+  for (const [path, version] of [
+    [workerPath, "2024-11-01"],
+    [identityPath, "2024-11-30"],
+  ]) {
+    try {
+      await client.request(`${path}?api-version=${version}`);
+      throw new Error(
+        "Privileged bootstrap resources must be removed before release",
+      );
+    } catch (error) {
+      if (error.status !== 404) throw error;
+    }
+  }
+  const workspace = az(
+    config,
+    [
+      "monitor",
+      "log-analytics",
+      "workspace",
+      "show",
+      "--resource-group",
+      config.resourceGroup,
+      "--workspace-name",
+      `${config.labId}-logs`,
+      "--query",
+      "customerId",
+    ],
+    { json: true },
+  );
+  const marker = `DOJO_BOOTSTRAP_READY ${proof.runId}`;
+  const query = `AppServiceConsoleLogs | where _ResourceId =~ '${workerPath}' and ResultDescription contains '${marker}' | project ResultDescription | take 1`;
+  const rows = az(
+    config,
+    [
+      "monitor",
+      "log-analytics",
+      "query",
+      "--workspace",
+      workspace,
+      "--analytics-query",
+      query,
+      "--timespan",
+      "PT1H",
+    ],
+    { json: true },
+  );
+  if (!rows.some((row) => row.ResultDescription?.includes(marker)))
+    throw new Error(
+      "Private vault bootstrap completion marker was not observed",
+    );
+  console.log("Private vault credentials verified by temporary VNet worker");
 }
 
 main()

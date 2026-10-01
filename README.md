@@ -256,6 +256,25 @@ VNet-connected execution path to the private endpoint; a successful ARM deployme
 alone does not complete installation. Do not expose the vault publicly or place
 secret values in deployment parameters to work around private-link access.
 
+For a private-only vault, use the temporary bootstrap worker after foundation
+provisioning. It uses the existing portal plan and delegated subnet, has no public
+ingress, and receives only ACR pull and vault-scoped Secrets Officer roles. Commit
+reviewed code first, then run:
+
+```text
+node scripts/bootstrap-secrets.mjs prepare --audit
+node scripts/bootstrap-secrets.mjs prepare --confirm "bootstrap-build:<subscription-id>:<resource-group>"
+node scripts/bootstrap-secrets.mjs apply --confirm "bootstrap:<preview-hash>:<subscription-id>:<resource-group>"
+```
+
+`prepare` builds and scans a pinned worker image, pushes it by digest, and prints
+the state-bound token from ARM what-if. `apply` repeats what-if, verifies both
+secrets inside the VNet and requires a run-specific non-secret Log Analytics
+marker. It removes the temporary site, identity and grants on completion or
+failure. A fresh online marker and cleanup readback are required before `deploy`
+can accept the ignored, short-lived bootstrap proof. Review the stored preview;
+never pass secret values on the command line or enable public vault access.
+
 No application image is selected in this stage. Two hosting plans, ACR, private
 endpoints, logs, storage and Key Vault incur charges even before release. Review
 current pricing for the chosen subscription/region; this project does not provide
