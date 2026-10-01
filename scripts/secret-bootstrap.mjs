@@ -54,8 +54,10 @@ if (
   try {
     await ensureBootstrapSecrets(secrets);
     await ensureBootstrapSecrets(secrets);
-    console.log(`DOJO_BOOTSTRAP_READY ${runId}`);
+    const readyMarker = `DOJO_BOOTSTRAP_READY ${runId}`;
+    console.log(readyMarker);
     startBootstrapHealth();
+    setInterval(() => console.log(readyMarker), 30_000).unref();
   } catch (error) {
     console.error(
       `Private vault bootstrap failed (${error.statusCode || "unavailable"})`,

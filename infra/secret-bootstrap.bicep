@@ -103,6 +103,7 @@ resource diagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' 
   name: 'bootstrap-status'
   properties: {
     workspaceId: workspace.id
+    logAnalyticsDestinationType: 'Dedicated'
     logs: [{ category: 'AppServiceConsoleLogs', enabled: true }]
   }
 }

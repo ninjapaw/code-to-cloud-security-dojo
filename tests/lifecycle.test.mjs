@@ -153,6 +153,7 @@ test("temporary credential worker is private, VNet-integrated and vault-scoped",
   assert.match(worker, /alwaysOn: true/);
   assert.match(worker, /name: 'WEBSITES_PORT', value: '8080'/);
   assert.match(worker, /applicationLogs: \{ fileSystem: \{ level: 'Information' \} \}/);
+  assert.match(worker, /logAnalyticsDestinationType: 'Dedicated'/);
   assert.match(
     worker,
     /guid\(vault\.id, identity\.id, 'KeyVaultSecretsOfficer'\)[\s\S]*?scope: vault[\s\S]*?b86a8fe4-44ce-4948-aee5-eccb2c155cd7/,
