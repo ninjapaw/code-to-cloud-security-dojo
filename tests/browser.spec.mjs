@@ -1,12 +1,53 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { mkdir } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { chromium } from "@playwright/test";
+import { createDeploymentStatus } from "../scripts/lib/deployment-status.mjs";
 import { createApp } from "../apps/control-portal/app.mjs";
 import { MemoryEvidenceStore } from "../shared/evidence-store.mjs";
 import { emptyReport } from "../shared/report.mjs";
+
+test("deployment status stays readable on desktop and mobile", async () => {
+  const output = await mkdtemp(join(tmpdir(), "dojo-status-browser-"));
+  const browser = await chromium.launch(
+    process.platform === "win32" ? { channel: "msedge" } : {},
+  );
+  try {
+    const status = await createDeploymentStatus(
+      {
+        labId: "training",
+        subscriptionId: "test-subscription",
+        resourceGroup: "code-to-cloud-training",
+        location: "centralus",
+      },
+      output,
+      "doctor",
+    );
+    await status.observe("provision", "Foundation ARM deployed; Key Vault credentials not verified");
+    const artifacts = fileURLToPath(new URL("../output/browser/", import.meta.url));
+    await mkdir(artifacts, { recursive: true });
+    for (const [name, width, height] of [["desktop", 1440, 900], ["mobile", 390, 844]]) {
+      const page = await browser.newPage({ viewport: { width, height } });
+      await page.goto(pathToFileURL(join(output, "deployment-status.html")).href);
+      assert.match(await page.locator("body").innerText(), /Foundation ARM deployed/);
+      assert.equal(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+        true,
+        `${name} deployment status must fit its viewport`,
+      );
+      await page.screenshot({ path: join(artifacts, `deployment-status-${name}.png`), fullPage: true });
+      await page.close();
+    }
+    await status.finish();
+  } finally {
+    await browser.close();
+    await rm(output, { recursive: true, force: true });
+  }
+});
 
 test("authenticated browser consent, fixed test execution, report and logout", async () => {
   const config = {

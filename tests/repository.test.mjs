@@ -81,6 +81,7 @@ test("deployment workflow is OIDC-only, staged and approval-gated", async () => 
   assert.match(workflow, /\.head_sha == \$sha/);
   assert.match(workflow, /RELEASE_RUN_ID.*\^\[0-9\]\+\$/s);
   assert.match(workflow, /workflow-provenance\.json/);
+  assert.match(workflow, /dojo-deployment-status-\$\{\{ github\.run_id \}\}/);
   assert.match(workflow, /\.operation == "build"/);
   assert.match(workflow, /npm ci --ignore-scripts/);
   assert.match(

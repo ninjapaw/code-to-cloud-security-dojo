@@ -187,6 +187,14 @@ wizard shows the target lab, requires the resource group name to be typed for
 billable and destructive steps, and supplies the same confirmation string the
 CLI demands; it never weakens a gate. No environment is inferred from a Git branch.
 
+Each live lifecycle action prints a local `file:///` deployment report link and
+updates `output/<lab-id>/deployment-status.html` and its JSON counterpart as
+stages progress. The HTML refreshes while a step runs and retains failed steps;
+observed ARM resources are not mistaken for completed credential or HTTP checks.
+GitHub Actions logs show the same progress and retain both status files as an
+artifact after every operation. `--audit` and offline source checks write no
+status files. The deployment status is separate from the security evidence report.
+
 ### Configure the Training Scope
 
 Install Node.js 22+, npm, Git, Azure CLI with Bicep, Docker and Trivy. The release

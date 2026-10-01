@@ -21,6 +21,7 @@ import { nginxProxy, nginxMode } from "../shared/nginx-proxy.mjs";
 import { imageEvidenceKey } from "../shared/image-evidence.mjs";
 import { buildNginxProxy, readNginxReceipt } from "./lib/nginx-proxy.mjs";
 import { buildDrowsyDragon, readDragonReceipt } from "./lib/drowsy-dragon.mjs";
+import { createDeploymentStatus } from "./lib/deployment-status.mjs";
 import {
   synchronizeSource,
   verifySource,
@@ -68,6 +69,12 @@ const allowed = [
   "deprovision",
 ];
 const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
+let deploymentStatus;
+const updateStatus = async (detail) => {
+  if (!deploymentStatus) return;
+  await deploymentStatus.update(detail);
+  console.log(`Deployment status: ${detail}`);
+};
 
 async function main() {
   if (!allowed.includes(action) || positionals.length > 1)
@@ -141,6 +148,9 @@ async function main() {
     );
     return;
   }
+  deploymentStatus = await createDeploymentStatus(config, output, action);
+  console.log(`Live deployment report: ${deploymentStatus.url}`);
+  await updateStatus("Verifying Azure context and lab ownership");
   const account = az(config, ["account", "show"], { json: true });
   assertContext(config, account);
   console.log(
@@ -157,9 +167,30 @@ async function main() {
   if (group) assertOwned(config, group);
 
   if (action === "doctor") {
+    await updateStatus("Checking tools, providers and current Defender coverage");
     for (const command of ["git", "docker", "trivy"])
       run(command, ["--version"]);
     const providers = az(config, ["provider", "list"], { json: true });
+    if (group) {
+      try {
+        const foundation = await client.request(
+          `${groupPath}/providers/Microsoft.Resources/deployments/dojo-foundation?api-version=2022-09-01`,
+        );
+        if (foundation.properties.provisioningState === "Succeeded")
+          await deploymentStatus.observe(
+            "provision",
+            "Foundation ARM deployment observed; Key Vault credentials not verified",
+          );
+      } catch (error) {
+        if (error.status !== 404) throw error;
+      }
+    }
+    const protection = await reconcileProtection(client, config.protection);
+    if (protection.length && protection.every((item) => item.state === "found"))
+      await deploymentStatus.observe(
+        "protection",
+        "Configured Defender plans observed at their approved settings",
+      );
     const required = [
       "Microsoft.Web",
       "Microsoft.Network",
@@ -182,7 +213,7 @@ async function main() {
               namespace: provider.namespace,
               state: provider.registrationState,
             })),
-          protection: await reconcileProtection(client, config.protection),
+          protection,
           requiredRoles: [
             "Infrastructure identity: group Contributor, conditioned RBAC, AcrPush, Key Vault Secrets Officer and Blob Data Contributor",
             "Infrastructure identity: subscription Defender pricing read",
@@ -203,12 +234,14 @@ async function main() {
       throw new Error(
         "Paid subscription-wide Defender changes require --accept-costs",
       );
+    await updateStatus("Comparing approved Defender plans with subscription readback");
     await mkdir(output, { recursive: true });
     const before = await reconcileProtection(client, config.protection);
     await writeFile(
       join(output, `protection-before-${Date.now()}.json`),
       JSON.stringify(before, null, 2),
     );
+    await updateStatus("Reconciling approved Defender plans and verifying readback");
     console.log(
       JSON.stringify(
         await reconcileProtection(client, config.protection, { apply: true }),
@@ -231,6 +264,9 @@ async function main() {
           Object.entries(parameters).map(([key, value]) => [key, { value }]),
         ),
       }),
+    );
+    await updateStatus(
+      `${operation === "what-if" ? "Previewing" : "Applying"} ${template} Bicep in ${config.resourceGroup}`,
     );
     return az(
       config,
@@ -256,6 +292,7 @@ async function main() {
     requireConfirmation(config, action, values.confirm);
     if (!values["accept-costs"])
       throw new Error("Provisioning requires --accept-costs");
+    await updateStatus("Checking provider registration and foundation prerequisites");
     for (const namespace of [
       "Microsoft.Web",
       "Microsoft.Network",
@@ -304,6 +341,7 @@ async function main() {
       ),
     );
     await deployTemplate("foundation", parameters);
+    await updateStatus("Creating or verifying admin and session secrets in Key Vault");
     await ensureSecrets(client, resourceNames.vault, false);
     console.log(
       "Foundation provisioned. Subscription Defender activation is a separate protection action. Build, review scans, then deploy.",
@@ -322,6 +360,7 @@ async function main() {
     );
   if (action === "rotate") {
     requireConfirmation(config, action, values.confirm);
+    await updateStatus("Rotating Key Vault credentials and refreshing references");
     await ensureSecrets(client, resourceNames.vault, true);
     await client.request(
       `${groupPath}/providers/Microsoft.Web/sites/${resourceNames.portal}/config/configreferences/appsettings/refresh?api-version=2024-11-01`,
@@ -348,6 +387,7 @@ async function main() {
       );
     run("docker", ["version"]);
     run("trivy", ["--version"]);
+    await updateStatus("Verifying pinned source and preparing the image recipe");
     await mkdir(output, { recursive: true });
     const prepared = await prepareDojoImage(sourceHome, config.source, output);
     const { sourcePath, dockerfile: recipe } = prepared;
@@ -375,6 +415,7 @@ async function main() {
       ],
     ]) {
       const image = `${resourceNames.registry}.azurecr.io/${repository}:${tag}`;
+      await updateStatus(`Building ${key} image for linux/amd64`);
       run(
         "docker",
         [
@@ -394,6 +435,7 @@ async function main() {
         { inherit: true },
       );
       const scanPath = join(output, `${key}-${tag}.sarif`);
+      await updateStatus(`Scanning ${key} image and retaining SARIF evidence`);
       run(
         "trivy",
         [
@@ -444,6 +486,7 @@ async function main() {
       }
     }
     await verifySource(sourceHome, config.source);
+    await updateStatus("Pushing scanned images to ACR by immutable digest");
     az(config, ["acr", "login", "--name", resourceNames.registry]);
     for (const entry of Object.values(release.images)) {
       if (
@@ -476,6 +519,7 @@ async function main() {
       );
     }
     validateRelease(config, release);
+    await updateStatus("Writing the reviewed release manifest");
     await writeFile(
       join(output, "release.json"),
       JSON.stringify(release, null, 2),
@@ -486,6 +530,7 @@ async function main() {
     return;
   }
   if (["deploy", "repair", "what-if"].includes(action)) {
+    await updateStatus("Verifying release provenance, scan hashes and registry digests");
     const release = validateRelease(
       config,
       JSON.parse(
@@ -541,6 +586,7 @@ async function main() {
     if (action === "what-if") return;
     requireConfirmation(config, `deploy:${deploymentHash}`, values.confirm);
     requireReleaseCostApproval(config, values["accept-costs"]);
+    await updateStatus("Checking Defender coverage and private Key Vault credentials");
     const coverage = await reconcileProtection(client, config.protection);
     if (coverage.some((item) => item.state !== "found"))
       throw new Error(
@@ -548,6 +594,7 @@ async function main() {
       );
     await ensureSecrets(client, resourceNames.vault, false);
     if (imageReceipts.length) {
+      await updateStatus("Recording optional image evidence in private Blob storage");
       const store = new BlobEvidenceStore(
         resourceNames.storage,
         client.credential,
@@ -573,6 +620,7 @@ async function main() {
     return;
   }
   if (["verify", "report"].includes(action)) {
+    await updateStatus("Collecting scoped Azure and Blob evidence");
     const store = new BlobEvidenceStore(
       resourceNames.storage,
       client.credential,
@@ -585,6 +633,7 @@ async function main() {
       evidenceError = error.message;
     }
     const report = await collectReport(config, client, runs, store);
+    await updateStatus("Checking deployed sites and writing the evidence report");
     if (evidenceError)
       report.checks.push({
         id: "Run evidence",
@@ -624,6 +673,7 @@ async function main() {
     return;
   }
   if (["inventory", "deprovision"].includes(action)) {
+    await updateStatus("Enumerating owned resources and retained subscription controls");
     const resources = await client.list(
       `${groupPath}/resources?api-version=2021-04-01`,
     );
@@ -654,6 +704,7 @@ async function main() {
       throw new Error(
         "Export portal reports and Blob evidence first, then pass --evidence-exported",
       );
+    await updateStatus("Removing only the approved owned lab resources");
     assertOwned(
       config,
       await client.request(`${groupPath}?api-version=2021-04-01`),
@@ -723,7 +774,21 @@ async function ensureSecrets(client, vaultName, rotate) {
   );
 }
 
-main().catch((error) => {
-  console.error(error.message);
-  process.exitCode = 1;
-});
+main()
+  .then(async () => {
+    if (!deploymentStatus) return;
+    await deploymentStatus.finish(Boolean(process.exitCode));
+    console.log(`Deployment status: ${action} ${process.exitCode ? "failed" : "completed"}`);
+  })
+  .catch(async (error) => {
+    console.error(error.message);
+    process.exitCode = 1;
+    if (deploymentStatus) {
+      try {
+        await deploymentStatus.finish(true);
+        console.log(`Deployment status: ${action} failed`);
+      } catch (statusError) {
+        console.error(`Could not update deployment status: ${statusError.message}`);
+      }
+    }
+  });

@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createDeploymentStatus, renderDeploymentStatus } from "../scripts/lib/deployment-status.mjs";
 import {
   configHash,
   requireConfirmation,
@@ -34,6 +38,41 @@ test("hostnames accept Azure-generated names but reject foreign sites and suffix
     names({ ...config, subscriptionId: "ABC", resourceGroup: "GROUP" }),
     names({ ...config, subscriptionId: "abc", resourceGroup: "group" }),
   );
+});
+test("live deployment status persists progress, failures, retries and escaped HTML", async () => {
+  const output = await mkdtemp(join(tmpdir(), "dojo-status-"));
+  const scope = { ...config, labId: "lab<test>", resourceGroup: "lab<test>" };
+  try {
+    const first = await createDeploymentStatus(scope, output, "provision");
+    assert.match(first.url, /^file:\/\//);
+    await first.update("Waiting for private vault <access>");
+    let status = JSON.parse(await readFile(join(output, "deployment-status.json"), "utf8"));
+    assert.equal(status.stages.find((stage) => stage.id === "provision").state, "in_progress");
+    let html = await readFile(join(output, "deployment-status.html"), "utf8");
+    assert.match(html, /http-equiv="refresh"/);
+    assert.match(html, /Waiting for private vault &lt;access&gt;/);
+    assert.doesNotMatch(html, /private vault <access>/);
+    await first.observe("build", "Image history seen; scan not verified");
+    status = JSON.parse(await readFile(join(output, "deployment-status.json"), "utf8"));
+    assert.equal(status.stages.find((stage) => stage.id === "build").state, "observed");
+    assert.match(renderDeploymentStatus(status), /scan not verified/);
+    const retry = await createDeploymentStatus(scope, output, "provision");
+    await retry.finish(true);
+    await retry.observe("provision", "Do not replace a failed run");
+    status = JSON.parse(await readFile(join(output, "deployment-status.json"), "utf8"));
+    assert.equal(status.stages.find((stage) => stage.id === "provision").state, "failed");
+    html = renderDeploymentStatus(status);
+    assert.doesNotMatch(html, /http-equiv="refresh"/);
+    assert.match(html, /lab&lt;test&gt;/);
+    const success = await createDeploymentStatus(scope, output, "provision");
+    await success.finish();
+    await success.observe("provision", "Do not replace a completed run");
+    status = JSON.parse(await readFile(join(output, "deployment-status.json"), "utf8"));
+    assert.equal(status.stages.find((stage) => stage.id === "provision").state, "succeeded");
+    assert.equal(status.stages.find((stage) => stage.id === "deploy").state, "pending");
+  } finally {
+    await rm(output, { recursive: true, force: true });
+  }
 });
 test("private App Service workloads route through an Internet-denied subnet", async () => {
   const foundation = await readFile(
