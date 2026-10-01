@@ -139,21 +139,13 @@ jobs:
           set -euo pipefail
           npm run image:build -- --tag dojo:scan
           docker build -f apps/control-portal/Dockerfile -t dojo-portal:scan .
+      - uses: aquasecurity/setup-trivy@e6c2c5e321ed9123bda567646e2f96565e34abe1 # v0.2.4
+        with:
+          version: v0.74.0
       - name: Record intentional Dojo workload vulnerabilities
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
-        with:
-          image-ref: dojo:scan
-          format: sarif
-          output: dojo-scan.sarif
-          exit-code: "0"
+        run: trivy image --format sarif --output dojo-scan.sarif --exit-code 0 dojo:scan
       - name: Gate portal high and critical vulnerabilities
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
-        with:
-          image-ref: dojo-portal:scan
-          format: sarif
-          output: portal-scan.sarif
-          severity: HIGH,CRITICAL
-          exit-code: "1"
+        run: trivy image --format sarif --output portal-scan.sarif --severity HIGH,CRITICAL --exit-code 1 dojo-portal:scan
       - name: Retain image and browser evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
