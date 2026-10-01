@@ -1,5 +1,5 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { resolve, join } from "node:path";
+import { resolve, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { createHash, randomBytes } from "node:crypto";
@@ -15,16 +15,11 @@ import { AzureClient } from "../shared/azure.mjs";
 import { reconcileProtection } from "../shared/protection.mjs";
 import { collectReport, reportHtml } from "../shared/report.mjs";
 import { BlobEvidenceStore } from "../shared/evidence-store.mjs";
-import {
-  drowsyDragon,
-} from "../shared/drowsy-dragon.mjs";
+import { drowsyDragon } from "../shared/drowsy-dragon.mjs";
 import { nginxProxy, nginxMode } from "../shared/nginx-proxy.mjs";
 import { imageEvidenceKey } from "../shared/image-evidence.mjs";
 import { buildNginxProxy, readNginxReceipt } from "./lib/nginx-proxy.mjs";
-import {
-  buildDrowsyDragon,
-  readDragonReceipt,
-} from "./lib/drowsy-dragon.mjs";
+import { buildDrowsyDragon, readDragonReceipt } from "./lib/drowsy-dragon.mjs";
 import {
   synchronizeSource,
   verifySource,
@@ -94,13 +89,15 @@ async function main() {
           drowsyDragon: {
             ...drowsyDragon,
             enabled: config.drowsyDragonEnabled === true,
-            runtime: "Azure Container Instances; no public ingress or HTTP tests",
+            runtime:
+              "Azure Container Instances; no public ingress or HTTP tests",
           },
           nginxProxy: {
             ...nginxProxy,
             ...nginxMode(config.nginxProxyMode),
             enabled: config.nginxProxyEnabled === true,
-            runtime: "Separate private App Service; NGINX proxies only its own training dashboard",
+            runtime:
+              "Separate private App Service; NGINX proxies only its own training dashboard",
           },
           stages: allowed,
           warning:
@@ -268,8 +265,22 @@ async function main() {
       "Microsoft.ManagedIdentity",
       "Microsoft.Security",
       ...(config.drowsyDragonEnabled ? ["Microsoft.ContainerInstance"] : []),
-    ])
-      az(config, ["provider", "register", "--namespace", namespace, "--wait"]);
+    ]) {
+      const state = az(config, [
+        "provider",
+        "show",
+        "--namespace",
+        namespace,
+        "--query",
+        "registrationState",
+        "--output",
+        "tsv",
+      ]);
+      if (state !== "Registered")
+        throw new Error(
+          `Provider ${namespace} is not registered; run npm run setup:github-oidc with --apply`,
+        );
+    }
     if (!group) {
       group = await client.request(`${groupPath}?api-version=2021-04-01`, {
         method: "PUT",
@@ -295,23 +306,7 @@ async function main() {
         2,
       ),
     );
-    const deployment = await deployTemplate("foundation", parameters);
-    const portalPrincipalId =
-      deployment.properties.outputs.portalPrincipalId.value;
-    az(config, [
-      "deployment",
-      "sub",
-      "create",
-      "--name",
-      `dojo-reader-${config.labId}`,
-      "--location",
-      config.location,
-      "--template-file",
-      "infra/security-reader.bicep",
-      "--parameters",
-      `portalPrincipalId=${portalPrincipalId}`,
-      `labId=${config.labId}`,
-    ]);
+    await deployTemplate("foundation", parameters);
     await ensureSecrets(client, resourceNames.vault, false);
     console.log(
       "Foundation provisioned. Subscription Defender activation is a separate protection action. Build, review scans, then deploy.",
@@ -363,6 +358,7 @@ async function main() {
     const release = {
       schemaVersion: 1,
       createdAt: new Date().toISOString(),
+      codeRevision: run("git", ["rev-parse", "HEAD"]),
       configHash: configHash(config),
       source: {
         ...config.source,
@@ -420,7 +416,14 @@ async function main() {
       release.images[key] = {
         repository,
         image,
-        scanPath,
+        imageId: run("docker", [
+          "image",
+          "inspect",
+          image,
+          "--format",
+          "{{.Id}}",
+        ]),
+        scanPath: relative(fileURLToPath(root), scanPath),
         scanHash: sha(await readFile(scanPath)),
       };
     }
@@ -437,14 +440,27 @@ async function main() {
         config.nginxProxyMode,
       );
     }
+    for (const entry of Object.values(release.images)) {
+      for (const key of Object.keys(entry)) {
+        if (key.endsWith("Path") && resolve(entry[key]) === entry[key])
+          entry[key] = relative(fileURLToPath(root), entry[key]);
+      }
+    }
     await verifySource(sourceHome, config.source);
     az(config, ["acr", "login", "--name", resourceNames.registry]);
     for (const entry of Object.values(release.images)) {
       if (
-        entry.imageId &&
-        run("docker", ["image", "inspect", entry.image, "--format", "{{.Id}}"]) !== entry.imageId
+        run("docker", [
+          "image",
+          "inspect",
+          entry.image,
+          "--format",
+          "{{.Id}}",
+        ]) !== entry.imageId
       )
-        throw new Error(`${entry.repository} image changed after scanning; rebuild before pushing`);
+        throw new Error(
+          `${entry.repository} image changed after scanning; rebuild before pushing`,
+        );
       run("docker", ["push", entry.image], { inherit: true });
       entry.digest = az(
         config,
@@ -468,7 +484,7 @@ async function main() {
       JSON.stringify(release, null, 2),
     );
     console.log(
-      `Built and scanned. Review SARIF, then approve deploy:${sha(JSON.stringify(release))}. No running app was changed.`,
+      "Built and scanned. Review SARIF, then run what-if to obtain a state-bound deployment confirmation. No running app was changed.",
     );
     return;
   }
@@ -482,6 +498,10 @@ async function main() {
         ),
       ),
     );
+    if (run("git", ["rev-parse", "HEAD"]) !== release.codeRevision)
+      throw new Error(
+        "Release was built from a different Git revision; rebuild and review it",
+      );
     const imageReceipts = [];
     if (config.drowsyDragonEnabled)
       imageReceipts.push(await readDragonReceipt(release.images.drowsyDragon));
@@ -507,24 +527,22 @@ async function main() {
         throw new Error("Registry digest verification failed");
     }
     const parameters = releaseParameters(config, release);
-    console.log(
+    const whatIf = await deployTemplate("main", parameters, "what-if");
+    console.log(JSON.stringify(whatIf, null, 2));
+    const deploymentHash = sha(JSON.stringify({ release, whatIf }));
+    await writeFile(
+      join(output, `what-if-${deploymentHash}.json`),
       JSON.stringify(
-        await deployTemplate("main", parameters, "what-if"),
+        { codeRevision: release.codeRevision, deploymentHash, whatIf },
         null,
         2,
       ),
     );
-    // Printed for both what-if and deploy so the reviewed release hash is
-    // visible before approval, mirroring what inventory does for deprovision.
     console.log(
-      `Required confirmation: deploy:${sha(JSON.stringify(release))}:${config.subscriptionId}:${config.resourceGroup}`,
+      `Required confirmation: deploy:${deploymentHash}:${config.subscriptionId}:${config.resourceGroup}`,
     );
     if (action === "what-if") return;
-    requireConfirmation(
-      config,
-      `deploy:${sha(JSON.stringify(release))}`,
-      values.confirm,
-    );
+    requireConfirmation(config, `deploy:${deploymentHash}`, values.confirm);
     requireReleaseCostApproval(config, values["accept-costs"]);
     const coverage = await reconcileProtection(client, config.protection);
     if (coverage.some((item) => item.state !== "found"))
@@ -533,10 +551,17 @@ async function main() {
       );
     await ensureSecrets(client, resourceNames.vault, false);
     if (imageReceipts.length) {
-      const store = new BlobEvidenceStore(resourceNames.storage, client.credential);
+      const store = new BlobEvidenceStore(
+        resourceNames.storage,
+        client.credential,
+      );
       for (const receipt of imageReceipts)
         await store.put(
-          imageEvidenceKey(receipt.demoId, receipt.imageDigest, receipt.hashes.scanJson),
+          imageEvidenceKey(
+            receipt.demoId,
+            receipt.imageDigest,
+            receipt.hashes.scanJson,
+          ),
           receipt,
         );
     }

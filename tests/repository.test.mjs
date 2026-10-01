@@ -50,6 +50,7 @@ test("owned labels use product and component names", async () => {
     "apps/control-portal/public/app.js",
     "shared/report.mjs",
     ".github/workflows/dojo.yml",
+    ".github/workflows/deploy.yml",
   ]) {
     const content = await readFile(join(root, relative), "utf8");
     assert.doesNotMatch(
@@ -60,7 +61,42 @@ test("owned labels use product and component names", async () => {
   }
   const readme = await readFile(join(root, "README.md"), "utf8");
   assert.match(readme, /^# Code to Cloud Security Dojo\r?\n/);
+  assert.match(readme, /npm run setup:github-oidc/);
+  assert.match(readme, /self-review disabled/);
   assert.doesNotMatch(readme, /\bscen(?:ario|airo)s?\b/i);
+});
+test("deployment workflow is OIDC-only, staged and approval-gated", async () => {
+  const workflow = await readFile(
+    join(root, ".github/workflows/deploy.yml"),
+    "utf8",
+  );
+  assert.match(workflow, /id-token: write/);
+  assert.match(workflow, /actions: read/);
+  assert.match(workflow, /environment: code-to-cloud-training/);
+  assert.match(workflow, /github\.ref == 'refs\/heads\/dev'/);
+  assert.match(workflow, /uses: azure\/login@[a-f0-9]{40} # v2\.3\.0/);
+  assert.match(workflow, /confirm-resource-group/);
+  assert.match(workflow, /accept-costs/);
+  assert.match(workflow, /release-confirmation/);
+  assert.match(workflow, /\.head_sha == \$sha/);
+  assert.match(workflow, /RELEASE_RUN_ID.*\^\[0-9\]\+\$/s);
+  assert.match(workflow, /workflow-provenance\.json/);
+  assert.match(workflow, /\.operation == "build"/);
+  assert.match(workflow, /npm ci --ignore-scripts/);
+  assert.match(
+    workflow,
+    /operation == 'what-if' \|\| inputs\.operation == 'deploy'/,
+  );
+  assert.doesNotMatch(workflow, /client-secret|AZURE_CLIENT_SECRET/);
+  const validation = await readFile(
+    join(root, ".github/workflows/dojo.yml"),
+    "utf8",
+  );
+  assert.match(validation, /environment: drowsy-dragon-images/);
+  assert.match(
+    validation,
+    /github\.ref == 'refs\/heads\/dev'.*inputs\.drowsy-dragon/,
+  );
 });
 test("all mutation audits are offline and do not write outputs", async () => {
   const temporary = await mkdtemp(join(tmpdir(), "dojo-audit-"));
@@ -100,7 +136,13 @@ test("all mutation audits are offline and do not write outputs", async () => {
   }
 });
 test("documentation local links and heading anchors resolve", async () => {
-  for (const relative of ["README.md", "SECURITY.md", "apps/dojo/README.md", "apps/drowsy-dragon/README.md", "apps/nginx-proxy/README.md"]) {
+  for (const relative of [
+    "README.md",
+    "SECURITY.md",
+    "apps/dojo/README.md",
+    "apps/drowsy-dragon/README.md",
+    "apps/nginx-proxy/README.md",
+  ]) {
     const path = join(root, relative);
     const markdown = await readFile(path, "utf8");
     assert.doesNotMatch(markdown, /\]\((?:\.\.\/)*docs\//);

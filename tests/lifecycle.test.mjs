@@ -35,6 +35,27 @@ test("hostnames accept Azure-generated names but reject foreign sites and suffix
     names({ ...config, subscriptionId: "abc", resourceGroup: "group" }),
   );
 });
+test("private App Service workloads route through an Internet-denied subnet", async () => {
+  const foundation = await readFile(
+    new URL("../infra/foundation.bicep", import.meta.url),
+    "utf8",
+  );
+  const main = await readFile(
+    new URL("../infra/main.bicep", import.meta.url),
+    "utf8",
+  );
+  const app = await readFile(
+    new URL("../infra/modules/app.bicep", import.meta.url),
+    "utf8",
+  );
+  assert.match(foundation, /name: 'DenyInternetOutbound'/);
+  assert.match(foundation, /destinationAddressPrefix: 'Internet'/);
+  assert.match(foundation, /name: 'workloads'/);
+  assert.match(main, /resource workloads .*name: 'workloads'/);
+  assert.match(main, /module dojo[\s\S]*?subnetId: workloads\.id/);
+  assert.match(main, /module nginxProxy[\s\S]*?subnetId: workloads\.id/);
+  assert.match(app, /vnetRouteAllEnabled: !empty\(subnetId\)/);
+});
 test("teardown removes only the owned subscription role for the exact principal", () => {
   const scope = `/subscriptions/${config.subscriptionId}`;
   const assignment = {
@@ -84,6 +105,7 @@ test("destructive confirmation is action and subscription bound", () => {
 test("release must carry immutable digests, scan hashes and exact config provenance", () => {
   const release = {
     schemaVersion: 1,
+    codeRevision: "0".repeat(40),
     configHash: configHash(config),
     source: {
       ...config.source,
@@ -92,17 +114,37 @@ test("release must carry immutable digests, scan hashes and exact config provena
       files: 1,
     },
     images: {
-      portal: { digest: `sha256:${"a".repeat(64)}`, scanHash: "b".repeat(64) },
-      dojo: { digest: `sha256:${"c".repeat(64)}`, scanHash: "d".repeat(64) },
+      portal: {
+        digest: `sha256:${"a".repeat(64)}`,
+        imageId: `sha256:${"b".repeat(64)}`,
+        scanHash: "c".repeat(64),
+      },
+      dojo: {
+        digest: `sha256:${"d".repeat(64)}`,
+        imageId: `sha256:${"e".repeat(64)}`,
+        scanHash: "f".repeat(64),
+      },
     },
   };
   validateRelease(config, release);
+  assert.throws(() =>
+    validateRelease(config, { ...release, codeRevision: undefined }),
+  );
   assert.throws(
     () => validateRelease(config, { ...release, source: config.source }),
     /snapshot provenance/,
   );
   assert.throws(() =>
     validateRelease({ ...config, location: "other" }, release),
+  );
+  assert.throws(() =>
+    validateRelease(config, {
+      ...release,
+      images: {
+        ...release.images,
+        portal: { ...release.images.portal, imageId: undefined },
+      },
+    }),
   );
   assert.throws(() => validateRelease(config, { ...release, images: {} }));
 });

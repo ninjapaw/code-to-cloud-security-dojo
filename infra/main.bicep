@@ -36,6 +36,7 @@ resource vault 'Microsoft.KeyVault/vaults@2024-11-01' existing = { name: vaultNa
 resource network 'Microsoft.Network/virtualNetworks@2024-05-01' existing = { name: '${labId}-vnet' }
 resource integration 'Microsoft.Network/virtualNetworks/subnets@2024-05-01' existing = { parent: network, name: 'portal' }
 resource endpoints 'Microsoft.Network/virtualNetworks/subnets@2024-05-01' existing = { parent: network, name: 'endpoints' }
+resource workloads 'Microsoft.Network/virtualNetworks/subnets@2024-05-01' existing = { parent: network, name: 'workloads' }
 resource workspace 'Microsoft.OperationalInsights/workspaces@2023-09-01' existing = { name: '${labId}-logs' }
 module drowsyDragon 'modules/drowsy-dragon.bicep' = if (drowsyDragonEnabled) {
   name: 'drowsy-dragon-release'
@@ -59,6 +60,7 @@ module dojo 'modules/app.bicep' = {
     adminIpv4Address: adminIpv4Address
     workspaceId: workspace.id
     port: '8080'
+    subnetId: workloads.id
     settings: [
       { name: 'WEBGOAT_HOST', value: '${dojoName}.azurewebsites.net' }
       { name: 'WEBWOLF_HOST', value: 'localhost' }
@@ -119,6 +121,7 @@ module nginxProxy 'modules/app.bicep' = if (nginxProxyEnabled) {
     adminIpv4Address: adminIpv4Address
     workspaceId: workspace.id
     port: '80'
+    subnetId: workloads.id
     healthCheckPath: '/health'
     evidenceTags: {
       'dojo.demo': 'nginx-proxy'

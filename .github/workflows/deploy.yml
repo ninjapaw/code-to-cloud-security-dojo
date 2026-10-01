@@ -1,0 +1,229 @@
+name: Code to Cloud Security Dojo deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Guarded lifecycle operation
+        type: choice
+        required: true
+        options:
+          - doctor
+          - provision
+          - protection
+          - build
+          - what-if
+          - deploy
+          - verify
+          - report
+      confirm-resource-group:
+        description: Type the configured resource group exactly
+        type: string
+        required: true
+      accept-costs:
+        description: Accept recurring charges (required for provision and protection)
+        type: boolean
+        default: false
+      release-run-id:
+        description: Build workflow run ID (required for what-if and deploy)
+        type: string
+        required: false
+      release-confirmation:
+        description: Exact deploy token emitted by what-if (required for deploy)
+        type: string
+        required: false
+
+permissions:
+  actions: read
+  contents: read
+  id-token: write
+
+concurrency:
+  group: dojo-deployment-code-to-cloud-training
+  cancel-in-progress: false
+
+jobs:
+  lifecycle:
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment: code-to-cloud-training
+    env:
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_PROTECTION_CLIENT_ID: ${{ vars.AZURE_PROTECTION_CLIENT_ID }}
+      DOJO_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      DOJO_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      DOJO_RESOURCE_GROUP: ${{ vars.DOJO_RESOURCE_GROUP }}
+      DOJO_LOCATION: ${{ vars.DOJO_LOCATION }}
+      DOJO_OPERATOR_OBJECT_ID: ${{ vars.DOJO_OPERATOR_OBJECT_ID }}
+      DOJO_ADMIN_CIDR: ${{ vars.DOJO_ADMIN_CIDR }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - uses: aquasecurity/setup-trivy@e6c2c5e321ed9123bda567646e2f96565e34abe1 # v0.2.4
+        with:
+          version: v0.74.0
+      - name: Validate target approval and create private configuration
+        env:
+          CONFIRM_RESOURCE_GROUP: ${{ inputs.confirm-resource-group }}
+          OPERATION: ${{ inputs.operation }}
+          ACCEPT_COSTS: ${{ inputs.accept-costs }}
+        run: |
+          set -euo pipefail
+          for name in AZURE_CLIENT_ID DOJO_TENANT_ID DOJO_SUBSCRIPTION_ID DOJO_RESOURCE_GROUP DOJO_LOCATION DOJO_OPERATOR_OBJECT_ID DOJO_ADMIN_CIDR; do
+            test -n "${!name:-}" || { echo "Missing GitHub environment variable: $name" >&2; exit 1; }
+          done
+          if [[ "$OPERATION" == "protection" ]]; then
+            test -n "$AZURE_PROTECTION_CLIENT_ID" || {
+              echo "Missing GitHub environment variable: AZURE_PROTECTION_CLIENT_ID" >&2
+              exit 1
+            }
+          fi
+          test "$CONFIRM_RESOURCE_GROUP" = "$DOJO_RESOURCE_GROUP" || {
+            echo "Resource-group confirmation does not match the protected environment." >&2
+            exit 1
+          }
+          if [[ "$OPERATION" == "provision" || "$OPERATION" == "protection" ]]; then
+            test "$ACCEPT_COSTS" = "true" || {
+              echo "This operation requires explicit recurring-cost consent." >&2
+              exit 1
+            }
+          fi
+          config_path="$RUNNER_TEMP/dojo-deploy.json"
+          echo "DOJO_CONFIG=$config_path" >> "$GITHUB_ENV"
+          jq \
+            --arg tenantId "$DOJO_TENANT_ID" \
+            --arg subscriptionId "$DOJO_SUBSCRIPTION_ID" \
+            --arg resourceGroup "$DOJO_RESOURCE_GROUP" \
+            --arg location "$DOJO_LOCATION" \
+            --arg operatorObjectId "$DOJO_OPERATOR_OBJECT_ID" \
+            --arg adminCidr "$DOJO_ADMIN_CIDR" \
+            '.tenantId = $tenantId
+              | .subscriptionId = $subscriptionId
+              | .resourceGroup = $resourceGroup
+              | .location = $location
+              | .operatorObjectId = $operatorObjectId
+              | .adminCidr = $adminCidr
+              | .drowsyDragonEnabled = false
+              | .nginxProxyEnabled = false' \
+            config/deploy.config.json > "$config_path"
+          chmod 600 "$config_path"
+          DOJO_CONFIG="$config_path" node scripts/deploy.mjs plan > /dev/null
+      - name: Sign in to Azure with GitHub OIDC
+        uses: azure/login@eec3c95657c1536435858eda1f3ff5437fee8474 # v2.3.0
+        with:
+          client-id: ${{ inputs.operation == 'protection' && env.AZURE_PROTECTION_CLIENT_ID || env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Verify reviewed build run provenance
+        if: inputs.operation == 'what-if' || inputs.operation == 'deploy'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_RUN_ID: ${{ inputs.release-run-id }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_RUN_ID" =~ ^[0-9]+$ ]] || { echo "release-run-id must be numeric" >&2; exit 1; }
+          run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RELEASE_RUN_ID")"
+          jq -e \
+            --arg sha "$GITHUB_SHA" \
+            '.event == "workflow_dispatch"
+              and .path == ".github/workflows/deploy.yml"
+              and .head_branch == "dev"
+              and .head_sha == $sha
+              and .conclusion == "success"' \
+            <<< "$run_json" > /dev/null || {
+              echo "Release artifact must come from a successful build operation on this exact dev commit." >&2
+              exit 1
+            }
+      - name: Download reviewed release evidence
+        if: inputs.operation == 'what-if' || inputs.operation == 'deploy'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: dojo-release-${{ inputs.release-run-id }}
+          path: output/code-to-cloud-training
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.release-run-id }}
+      - name: Verify release artifact provenance
+        if: inputs.operation == 'what-if' || inputs.operation == 'deploy'
+        env:
+          RELEASE_RUN_ID: ${{ inputs.release-run-id }}
+        run: |
+          set -euo pipefail
+          jq -e \
+            --arg runId "$RELEASE_RUN_ID" \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg sha "$GITHUB_SHA" \
+            '.runId == $runId
+              and .repository == $repository
+              and .workflow == ".github/workflows/deploy.yml"
+              and .ref == "refs/heads/dev"
+              and .sha == $sha
+              and .operation == "build"' \
+            output/code-to-cloud-training/workflow-provenance.json > /dev/null || {
+              echo "Release artifact provenance does not match this reviewed deployment." >&2
+              exit 1
+            }
+      - name: Execute guarded lifecycle operation
+        env:
+          OPERATION: ${{ inputs.operation }}
+          ACCEPT_COSTS: ${{ inputs.accept-costs }}
+          RELEASE_RUN_ID: ${{ inputs.release-run-id }}
+          RELEASE_CONFIRMATION: ${{ inputs.release-confirmation }}
+        run: |
+          set -euo pipefail
+          case "$OPERATION" in
+            doctor|verify|report)
+              node scripts/deploy.mjs "$OPERATION"
+              ;;
+            provision|protection)
+              node scripts/deploy.mjs "$OPERATION" \
+                --confirm "$OPERATION:$DOJO_SUBSCRIPTION_ID:$DOJO_RESOURCE_GROUP" \
+                --accept-costs
+              ;;
+            build)
+              node scripts/deploy.mjs build \
+                --confirm "build:$DOJO_SUBSCRIPTION_ID:$DOJO_RESOURCE_GROUP"
+              ;;
+            what-if)
+              [[ "$RELEASE_RUN_ID" =~ ^[0-9]+$ ]] || { echo "release-run-id must be numeric" >&2; exit 1; }
+              node scripts/deploy.mjs what-if \
+                --release output/code-to-cloud-training/release.json
+              ;;
+            deploy)
+              [[ "$RELEASE_RUN_ID" =~ ^[0-9]+$ ]] || { echo "release-run-id must be numeric" >&2; exit 1; }
+              test -n "$RELEASE_CONFIRMATION" || { echo "release-confirmation is required" >&2; exit 1; }
+              deploy_args=( \
+                --release output/code-to-cloud-training/release.json \
+                --confirm "$RELEASE_CONFIRMATION" \
+              )
+              if [[ "$ACCEPT_COSTS" == "true" ]]; then deploy_args+=(--accept-costs); fi
+              node scripts/deploy.mjs deploy "${deploy_args[@]}"
+              ;;
+          esac
+      - name: Record build workflow provenance
+        if: success() && inputs.operation == 'build'
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg workflow ".github/workflows/deploy.yml" \
+            --arg ref "$GITHUB_REF" \
+            --arg sha "$GITHUB_SHA" \
+            --arg operation "build" \
+            '{runId: $runId, repository: $repository, workflow: $workflow, ref: $ref, sha: $sha, operation: $operation}' \
+            > output/code-to-cloud-training/workflow-provenance.json
+      - name: Retain immutable release and review evidence
+        if: always() && (inputs.operation == 'build' || inputs.operation == 'what-if' || inputs.operation == 'deploy' || inputs.operation == 'verify' || inputs.operation == 'report')
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dojo-release-${{ github.run_id }}
+          path: output/code-to-cloud-training/
+          if-no-files-found: error
+          retention-days: 90

@@ -64,8 +64,12 @@ test("unowned source and unpinned revisions cannot be imported", async () => {
 });
 test("owned image build retains upstream runtime recipe and fails on recipe drift", () => {
   const original =
-    'FROM runtime\nCOPY --chown=webgoat target/webgoat-*.jar /home/webgoat/webgoat.jar\nUSER webgoat\nENTRYPOINT ["java","-jar","webgoat.jar"]\n';
+    'FROM docker.io/eclipse-temurin:25-jdk-noble\nCOPY --chown=webgoat target/webgoat-*.jar /home/webgoat/webgoat.jar\nUSER webgoat\nENTRYPOINT ["java","-jar","webgoat.jar"]\n';
   const recipe = imageRecipe(original);
+  assert.equal(
+    recipe.match(/eclipse-temurin:25-jdk-noble@sha256:[a-f0-9]{64}/g)?.length,
+    2,
+  );
   assert.match(recipe, /mvnw -B -DskipTests package/);
   assert.ok(recipe.includes("sed -i 's/\\r$//' mvnw"));
   assert.match(recipe, /COPY --from=dojo-build/);

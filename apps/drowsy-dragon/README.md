@@ -21,14 +21,14 @@ if the base pin or commands drift. Images are built for `linux/amd64`.
 
 ## What this demonstrates
 
-| Step | Evidence to keep | What it does not prove |
-| --- | --- | --- |
-| Code | Reviewed Dockerfile, Git revision, base digest and recipe hash | Imported .NET application source or a native repository-to-runtime edge |
-| Build | Derived image ID and `dpkg-query` inventory | That a hardened or digest-pinned image is vulnerability-free |
-| Scan | Full Trivy JSON, SARIF, timestamps and hashes | Defender ingestion, runtime exploitability or a guaranteed CVE list |
-| Cloud | ACR release digest, ACI image/state and no-ingress readback | Application HTTP health or exploit detection |
-| Compare | Package versions, finding IDs, scanner timestamps and before/after digests | Remediation based only on changing finding counts |
-| Retire | Approved resource-group inventory and evidence export | Removal of subscription-wide Defender charges |
+| Step    | Evidence to keep                                                           | What it does not prove                                                  |
+| ------- | -------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| Code    | Reviewed Dockerfile, Git revision, base digest and recipe hash             | Imported .NET application source or a native repository-to-runtime edge |
+| Build   | Derived image ID and `dpkg-query` inventory                                | That a hardened or digest-pinned image is vulnerability-free            |
+| Scan    | Full Trivy JSON, SARIF, timestamps and hashes                              | Defender ingestion, runtime exploitability or a guaranteed CVE list     |
+| Cloud   | ACR release digest, ACI image/state and no-ingress readback                | Application HTTP health or exploit detection                            |
+| Compare | Package versions, finding IDs, scanner timestamps and before/after digests | Remediation based only on changing finding counts                       |
+| Retire  | Approved resource-group inventory and evidence export                      | Removal of subscription-wide Defender charges                           |
 
 Track `libc6`, `libc-bin`, `tar` and `libgcrypt20`. The full image scan is retained,
 including findings outside those packages. There are deliberately **no hard-coded
@@ -137,8 +137,9 @@ not proof that a particular CVE was fixed.
 The [validation workflow](../../.github/workflows/dojo.yml) always tests the
 integration. Its additional image job runs only on an explicit manual dispatch
 with the `drowsy-dragon` boolean enabled. Configure the `DHI_USERNAME` and
-`DHI_TOKEN` repository secrets for an account authorized to pull the pin. The
-job fails explicitly if either is missing, signs out after use, and retains the
+`DHI_TOKEN` secrets only in the protected `drowsy-dragon-images` environment,
+restricted to `dev`, for an account authorized to pull the pin. The job fails
+explicitly if either is missing, signs out after use, and retains the
 `drowsy-dragon-evidence` artifact. It has no Azure credentials or deployment step.
 
 ## Cleanup and limitations

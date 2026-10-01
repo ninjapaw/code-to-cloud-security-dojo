@@ -201,11 +201,17 @@ async function synchronizeOwnedSource(home, source, { execute = run } = {}) {
 
 export function imageRecipe(upstreamRecipe) {
   const copy = "COPY --chown=webgoat target/webgoat-*.jar";
-  if (upstreamRecipe.split(copy).length !== 2)
+  const upstreamBase = "FROM docker.io/eclipse-temurin:25-jdk-noble";
+  const pinnedBase =
+    "eclipse-temurin:25-jdk-noble@sha256:f6366ccac38ceae180280ad7012d18a15e8031548a430dc2bae06631d9e88ed0";
+  if (
+    upstreamRecipe.split(copy).length !== 2 ||
+    upstreamRecipe.split(upstreamBase).length !== 2
+  )
     throw new Error(
       "Upstream Dockerfile packaging changed; review the image recipe",
     );
-  return `FROM eclipse-temurin:25-jdk-noble AS dojo-build\nWORKDIR /src\nCOPY . .\nRUN sed -i 's/\\r$//' mvnw && chmod +x mvnw && ./mvnw -B -DskipTests package\n${upstreamRecipe.replace(copy, "COPY --from=dojo-build --chown=webgoat /src/target/webgoat-*.jar")}\nLABEL name="Code to Cloud Security Dojo" org.opencontainers.image.title="Code to Cloud Security Dojo"\n`;
+  return `FROM ${pinnedBase} AS dojo-build\nWORKDIR /src\nCOPY . .\nRUN sed -i 's/\\r$//' mvnw && chmod +x mvnw && ./mvnw -B -DskipTests package\n${upstreamRecipe.replace(upstreamBase, `FROM ${pinnedBase}`).replace(copy, "COPY --from=dojo-build --chown=webgoat /src/target/webgoat-*.jar")}\nLABEL name="Code to Cloud Security Dojo" org.opencontainers.image.title="Code to Cloud Security Dojo"\n`;
 }
 
 export async function prepareDojoImage(home, source, output) {

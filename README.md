@@ -96,16 +96,72 @@ through actual requests and readback, not assumed from a deployment success.
 
 The [workflow](.github/workflows/dojo.yml) runs tests, compiles IaC, scans source
 with Microsoft Security DevOps, builds and scans both images, and retains evidence.
-It has **no Azure deployment credentials or write operations**. Operator releases
-use the wizard. WebGoat vulnerabilities are intentional and require review; high
-or critical portal image vulnerabilities fail the release build.
+It has **no Azure deployment credentials or write operations**. WebGoat
+vulnerabilities are intentional and require review; high or critical portal image
+vulnerabilities fail the release build.
+
+The separate [manual deployment workflow](.github/workflows/deploy.yml) uses
+GitHub OIDC and the protected `code-to-cloud-training` environment. Configure its
+`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`,
+`DOJO_RESOURCE_GROUP`, `DOJO_LOCATION`, `DOJO_OPERATOR_OBJECT_ID`, and
+`DOJO_ADMIN_CIDR` environment variables, then require an environment reviewer.
+The Entra application's federated credential must use audience
+`api://AzureADTokenExchange` and subject
+`repo:ninjapaw@301718044/code-to-cloud-security-dojo@1395015776:environment:code-to-cloud-training`.
+Create or reconcile the complete trust with the dry-run-by-default bootstrap:
+
+```text
+npm run setup:github-oidc -- --subscription <subscription-id> \
+  --resource-group code-to-cloud-training --location centralus \
+  --operator-object-id <entra-object-id> --admin-cidr <public-ip>/32 \
+  --reviewer-id <github-user-id>
+
+# After reviewing every `would` line:
+npm run setup:github-oidc -- --apply --subscription <subscription-id> \
+  --resource-group code-to-cloud-training --location centralus \
+  --operator-object-id <entra-object-id> --admin-cidr <public-ip>/32 \
+  --reviewer-id <github-user-id>
+```
+
+The bootstrap follows Pawprint's ID-qualified subject pattern, creates no client
+secret, refuses unowned app-name collisions, pre-registers providers, creates the
+ownership-tagged group and portal identity, and writes ignored state to
+`.azure/oidc-bootstrap.json`. The infrastructure identity receives group-scoped
+deployment/data roles, a role-conditioned group RBAC assignment, and read-only
+Defender pricing access. A separate protection identity can only read/write
+Defender pricing. The portal identity receives the fixed subscription Security
+Reader assignment, so the workflow has no subscription RBAC administrator role.
+Re-running `--apply` must report every item as `ok`.
+
+After the guarded lab deprovision removes the resource group, retire standing
+workflow trust separately. Retirement refuses a present group and requires the
+exact token so it cannot disable a live lab accidentally:
+
+```text
+npm run setup:github-oidc -- --remove \
+  --confirm-remove retire:<subscription-id>:code-to-cloud-training \
+  --subscription <subscription-id> --resource-group code-to-cloud-training \
+  --operator-object-id <entra-object-id> --admin-cidr <public-ip>/32
+```
+
+The environment is restricted to `dev` with self-review disabled. Add a separate
+trusted reviewer before dispatching from the account that configured the trust;
+the bootstrap cannot manufacture an independent human approval boundary.
+It exposes the guarded lifecycle as separate runs: provision and protection need
+cost consent; build uploads immutable release evidence; what-if consumes that
+build run; deploy consumes the same run and requires the exact token printed by
+what-if. It runs only from `dev`, never uses client secrets, and does not automate
+cleanup, credential rotation, GitHub connector consent, or plan downgrades.
 
 The optional Drowsy Dragon CI job is manually enabled and needs DHI pull
-credentials, not Azure credentials. It retains all-severity Trivy JSON/SARIF and
-package inventory without inventing an expected CVE list. Its portal/report
-tracking keeps Trivy evidence separate from Defender observations.
-The independent optional NGINX CI job builds/scans both affected and target-CVE
-remediated modes. Both optional demos use the same package/scan evidence helpers,
+credentials, not Azure credentials. Store them only in a protected
+`drowsy-dragon-images` environment restricted to `dev`, not as repository-wide
+secrets. The job retains all-severity Trivy JSON/SARIF and package inventory
+without inventing an expected CVE list. Its portal/report tracking keeps Trivy
+evidence separate from Defender observations.
+The independent NGINX CI job builds/scans both affected and target-CVE remediated
+modes on pushes and pull requests. Drowsy Dragon remains manual because it needs
+DHI credentials. Both optional demos use the same package/scan evidence helpers,
 and may be enabled together for a four-image release including the admin portal.
 
 Defender GitHub consent, repository discovery, native GitHub security features and
@@ -232,8 +288,9 @@ connector/native coverage unknown when it cannot independently verify it.
 The imported NGINX JavaScript/dependency snapshot lives under
 `apps/nginx-proxy/upstream`; verify its scanner coverage and exclusions separately.
 
-CI does not deploy and needs no Azure OIDC trust. Any future automated deployment
-must use scoped OIDC with verified claims and approval of the scanned artifact.
+Ordinary push and pull-request validation has no Azure credentials or writes. Only
+the manual, protected deployment workflow uses environment-scoped OIDC, and deploy
+requires the exact token produced while reviewing the same build artifact.
 
 ### Build, Review and Release
 

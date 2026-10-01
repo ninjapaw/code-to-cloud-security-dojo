@@ -17,6 +17,7 @@ param nginxProxyEnabled bool = false
 param nginxProxyName string = '${replace(dojoName, '-app', '')}-proxy'
 var tags = { 'dojo.labId': labId, 'dojo.managedBy': 'code-to-cloud-security-dojo' }
 var appNames = concat([portalName, dojoName], nginxProxyEnabled ? [nginxProxyName] : [])
+var workloadNames = concat([dojoName], nginxProxyEnabled ? [nginxProxyName] : [])
 resource registry 'Microsoft.ContainerRegistry/registries@2025-04-01' = {
   name: registryName
   location: location
@@ -24,17 +25,29 @@ resource registry 'Microsoft.ContainerRegistry/registries@2025-04-01' = {
   sku: { name: 'Basic' }
   properties: { adminUserEnabled: false, anonymousPullEnabled: false, publicNetworkAccess: 'Enabled' }
 }
-resource identities 'Microsoft.ManagedIdentity/userAssignedIdentities@2024-11-30' = [for name in appNames: {
+resource portalIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2024-11-30' existing = {
+  name: '${portalName}-identity'
+}
+resource workloadIdentities 'Microsoft.ManagedIdentity/userAssignedIdentities@2024-11-30' = [for name in workloadNames: {
   name: '${name}-identity'
   location: location
   tags: tags
 }]
-resource pulls 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for (name, index) in appNames: {
+resource portalPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(registry.id, portalName, 'AcrPull')
+  scope: registry
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
+    principalId: portalIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+resource workloadPulls 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for (name, index) in workloadNames: {
   name: guid(registry.id, name, 'AcrPull')
   scope: registry
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
-    principalId: identities[index].properties.principalId
+    principalId: workloadIdentities[index].properties.principalId
     principalType: 'ServicePrincipal'
   }
 }]
@@ -46,6 +59,54 @@ resource plans 'Microsoft.Web/serverfarms@2024-11-01' = [for name in appNames: {
   sku: { name: appServiceSku, capacity: 1 }
   properties: { reserved: true }
 }]
+resource workloadNsg 'Microsoft.Network/networkSecurityGroups@2024-05-01' = {
+  name: '${labId}-workloads-nsg'
+  location: location
+  tags: tags
+  properties: {
+    securityRules: [
+      {
+        name: 'AllowVirtualNetworkOutbound'
+        properties: {
+          priority: 100
+          direction: 'Outbound'
+          access: 'Allow'
+          protocol: '*'
+          sourcePortRange: '*'
+          destinationPortRange: '*'
+          sourceAddressPrefix: 'VirtualNetwork'
+          destinationAddressPrefix: 'VirtualNetwork'
+        }
+      }
+      {
+        name: 'AllowAzureDnsOutbound'
+        properties: {
+          priority: 110
+          direction: 'Outbound'
+          access: 'Allow'
+          protocol: '*'
+          sourcePortRange: '*'
+          destinationPortRange: '53'
+          sourceAddressPrefix: 'VirtualNetwork'
+          destinationAddressPrefix: 'AzurePlatformDNS'
+        }
+      }
+      {
+        name: 'DenyInternetOutbound'
+        properties: {
+          priority: 200
+          direction: 'Outbound'
+          access: 'Deny'
+          protocol: '*'
+          sourcePortRange: '*'
+          destinationPortRange: '*'
+          sourceAddressPrefix: 'VirtualNetwork'
+          destinationAddressPrefix: 'Internet'
+        }
+      }
+    ]
+  }
+}
 resource network 'Microsoft.Network/virtualNetworks@2024-05-01' = {
   
   name: '${labId}-vnet'
@@ -56,6 +117,14 @@ resource network 'Microsoft.Network/virtualNetworks@2024-05-01' = {
     subnets: [
       { name: 'portal', properties: { addressPrefix: '10.87.1.0/24', delegations: [{ name: 'web', properties: { serviceName: 'Microsoft.Web/serverFarms' } }] } }
       { name: 'endpoints', properties: { addressPrefix: '10.87.2.0/24', privateEndpointNetworkPolicies: 'Disabled' } }
+      {
+        name: 'workloads'
+        properties: {
+          addressPrefix: '10.87.3.0/24'
+          delegations: [{ name: 'web', properties: { serviceName: 'Microsoft.Web/serverFarms' } }]
+          networkSecurityGroup: { id: workloadNsg.id }
+        }
+      }
     ]
   }
 }
@@ -78,9 +147,9 @@ resource vaultRoles 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for 
   { portal: true, role: '4633458b-17de-408a-b874-0445c86b69e6', kind: 'ServicePrincipal' }
   { portal: false, role: 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7', kind: operatorPrincipalType }
 ]: {
-  name: guid(vault.id, grant.portal ? identities[0].id : operatorObjectId, grant.role)
+  name: guid(vault.id, grant.portal ? portalIdentity.id : operatorObjectId, grant.role)
   scope: vault
-  properties: { principalId: grant.portal ? identities[0].properties.principalId : operatorObjectId, principalType: grant.kind, roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', grant.role) }
+  properties: { principalId: grant.portal ? portalIdentity.properties.principalId : operatorObjectId, principalType: grant.kind, roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', grant.role) }
 }]
 resource storage 'Microsoft.Storage/storageAccounts@2025-01-01' = {
   name: storageName
@@ -111,10 +180,10 @@ resource evidenceRoles 'Microsoft.Authorization/roleAssignments@2022-04-01' = [f
   { portal: true, kind: 'ServicePrincipal' }
   { portal: false, kind: operatorPrincipalType }
 ]: {
-  name: guid(evidence.id, grant.portal ? identities[0].id : operatorObjectId, 'blob-data-contributor')
+  name: guid(evidence.id, grant.portal ? portalIdentity.id : operatorObjectId, 'blob-data-contributor')
   scope: evidence
   properties: {
-    principalId: grant.portal ? identities[0].properties.principalId : operatorObjectId
+    principalId: grant.portal ? portalIdentity.properties.principalId : operatorObjectId
     principalType: grant.kind
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')
   }
@@ -134,14 +203,14 @@ resource workspace 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
   properties: { sku: { name: 'PerGB2018' }, retentionInDays: 30 }
 }
 resource portalReader 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(resourceGroup().id, identities[0].id, 'dojo-reader')
+  name: guid(resourceGroup().id, portalIdentity.id, 'dojo-reader')
   properties: {
-    principalId: identities[0].properties.principalId
+    principalId: portalIdentity.properties.principalId
     principalType: 'ServicePrincipal'
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'acdd72a7-3385-48ef-bd42-f606fba81ae7')
   }
 }
-output portalPrincipalId string = identities[0].properties.principalId
+output portalPrincipalId string = portalIdentity.properties.principalId
 output registryLoginServer string = registry.properties.loginServer
 output vaultUri string = vault.properties.vaultUri
 output evidenceEndpoint string = storage.properties.primaryEndpoints.blob

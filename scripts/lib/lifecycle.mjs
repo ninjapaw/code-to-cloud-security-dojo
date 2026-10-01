@@ -97,6 +97,7 @@ export function validateRelease(config, release) {
     );
   if (
     release.schemaVersion !== 1 ||
+    !/^[a-f0-9]{40}$/.test(release.codeRevision || "") ||
     release.configHash !== configHash(config) ||
     release.source.revision !== config.source.revision ||
     release.source.repository !== config.source.repository
@@ -115,16 +116,19 @@ export function validateRelease(config, release) {
   for (const image of requiredImages) {
     if (
       !/^sha256:[a-f0-9]{64}$/.test(release.images?.[image]?.digest) ||
+      !/^sha256:[a-f0-9]{64}$/.test(release.images[image].imageId) ||
       !/^[a-f0-9]{64}$/.test(release.images[image].scanHash)
     )
-      throw new Error(`Missing digest or scan evidence: ${image}`);
+      throw new Error(`Missing digest, image ID or scan evidence: ${image}`);
   }
   if (config.drowsyDragonEnabled) {
     const entry = release.images.drowsyDragon;
     if (
       entry.repository !== drowsyDragon.id ||
       entry.baseImage !== drowsyDragon.baseImage ||
-      !entry.image?.startsWith(`${names(config).registry}.azurecr.io/drowsy-dragon:`) ||
+      !entry.image?.startsWith(
+        `${names(config).registry}.azurecr.io/drowsy-dragon:`,
+      ) ||
       !/^sha256:[a-f0-9]{64}$/.test(entry.imageId || "") ||
       !/^[a-f0-9]{40}$/.test(entry.sourceRevision || "") ||
       !Number.isFinite(Date.parse(entry.scannedAt)) ||
@@ -135,7 +139,9 @@ export function validateRelease(config, release) {
         (key) => typeof entry[key] !== "string" || !entry[key],
       )
     )
-      throw new Error("Drowsy Dragon requires pinned provenance and package/scan evidence");
+      throw new Error(
+        "Drowsy Dragon requires pinned provenance and package/scan evidence",
+      );
   }
   if (config.nginxProxyEnabled) {
     const entry = release.images.nginxProxy;
@@ -144,7 +150,9 @@ export function validateRelease(config, release) {
       entry.mode !== nginxMode(config.nginxProxyMode).mode ||
       entry.dockerfileHash !== nginxProxy.dockerfileHash ||
       entry.sourceSnapshotHash !== nginxProxy.source.sha256 ||
-      !entry.image?.startsWith(`${names(config).registry}.azurecr.io/nginx-proxy:`) ||
+      !entry.image?.startsWith(
+        `${names(config).registry}.azurecr.io/nginx-proxy:`,
+      ) ||
       !/^sha256:[a-f0-9]{64}$/.test(entry.imageId || "") ||
       !/^[a-f0-9]{40}$/.test(entry.sourceRevision || "") ||
       !Number.isFinite(Date.parse(entry.scannedAt)) ||
@@ -155,7 +163,9 @@ export function validateRelease(config, release) {
         (key) => typeof entry[key] !== "string" || !entry[key],
       )
     )
-      throw new Error("NGINX Proxy requires its approved mode, source pin and package/scan evidence");
+      throw new Error(
+        "NGINX Proxy requires its approved mode, source pin and package/scan evidence",
+      );
   }
   return release;
 }
@@ -180,6 +190,11 @@ export function releaseParameters(config, release) {
 }
 
 export function requireReleaseCostApproval(config, accepted) {
-  if ((config.drowsyDragonEnabled || config.nginxProxyEnabled) && accepted !== true)
-    throw new Error("Optional image demos incur recurring Azure charges; deploy requires --accept-costs");
+  if (
+    (config.drowsyDragonEnabled || config.nginxProxyEnabled) &&
+    accepted !== true
+  )
+    throw new Error(
+      "Optional image demos incur recurring Azure charges; deploy requires --accept-costs",
+    );
 }
