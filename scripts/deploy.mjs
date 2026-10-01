@@ -167,7 +167,9 @@ async function main() {
   if (group) assertOwned(config, group);
 
   if (action === "doctor") {
-    await updateStatus("Checking tools, providers and current Defender coverage");
+    await updateStatus(
+      "Checking tools, providers and current Defender coverage",
+    );
     for (const command of ["git", "docker", "trivy"])
       run(command, ["--version"]);
     const providers = az(config, ["provider", "list"], { json: true });
@@ -234,14 +236,18 @@ async function main() {
       throw new Error(
         "Paid subscription-wide Defender changes require --accept-costs",
       );
-    await updateStatus("Comparing approved Defender plans with subscription readback");
+    await updateStatus(
+      "Comparing approved Defender plans with subscription readback",
+    );
     await mkdir(output, { recursive: true });
     const before = await reconcileProtection(client, config.protection);
     await writeFile(
       join(output, `protection-before-${Date.now()}.json`),
       JSON.stringify(before, null, 2),
     );
-    await updateStatus("Reconciling approved Defender plans and verifying readback");
+    await updateStatus(
+      "Reconciling approved Defender plans and verifying readback",
+    );
     console.log(
       JSON.stringify(
         await reconcileProtection(client, config.protection, { apply: true }),
@@ -292,7 +298,9 @@ async function main() {
     requireConfirmation(config, action, values.confirm);
     if (!values["accept-costs"])
       throw new Error("Provisioning requires --accept-costs");
-    await updateStatus("Checking provider registration and foundation prerequisites");
+    await updateStatus(
+      "Checking provider registration and foundation prerequisites",
+    );
     for (const namespace of [
       "Microsoft.Web",
       "Microsoft.Network",
@@ -305,11 +313,9 @@ async function main() {
       "Microsoft.Security",
       ...(config.drowsyDragonEnabled ? ["Microsoft.ContainerInstance"] : []),
     ]) {
-      const state = az(
-        config,
-        ["provider", "show", "--namespace", namespace],
-        { json: true },
-      ).registrationState;
+      const state = az(config, ["provider", "show", "--namespace", namespace], {
+        json: true,
+      }).registrationState;
       if (state !== "Registered")
         throw new Error(
           `Provider ${namespace} is not registered; run npm run setup:github-oidc with --apply`,
@@ -341,7 +347,9 @@ async function main() {
       ),
     );
     await deployTemplate("foundation", parameters);
-    await updateStatus("Creating or verifying admin and session secrets in Key Vault");
+    await updateStatus(
+      "Creating or verifying admin and session secrets in Key Vault",
+    );
     await ensureSecrets(client, resourceNames.vault, false);
     console.log(
       "Foundation provisioned. Subscription Defender activation is a separate protection action. Build, review scans, then deploy.",
@@ -360,7 +368,9 @@ async function main() {
     );
   if (action === "rotate") {
     requireConfirmation(config, action, values.confirm);
-    await updateStatus("Rotating Key Vault credentials and refreshing references");
+    await updateStatus(
+      "Rotating Key Vault credentials and refreshing references",
+    );
     await ensureSecrets(client, resourceNames.vault, true);
     await client.request(
       `${groupPath}/providers/Microsoft.Web/sites/${resourceNames.portal}/config/configreferences/appsettings/refresh?api-version=2024-11-01`,
@@ -387,7 +397,9 @@ async function main() {
       );
     run("docker", ["version"]);
     run("trivy", ["--version"]);
-    await updateStatus("Verifying pinned source and preparing the image recipe");
+    await updateStatus(
+      "Verifying pinned source and preparing the image recipe",
+    );
     await mkdir(output, { recursive: true });
     const prepared = await prepareDojoImage(sourceHome, config.source, output);
     const { sourcePath, dockerfile: recipe } = prepared;
@@ -530,7 +542,9 @@ async function main() {
     return;
   }
   if (["deploy", "repair", "what-if"].includes(action)) {
-    await updateStatus("Verifying release provenance, scan hashes and registry digests");
+    await updateStatus(
+      "Verifying release provenance, scan hashes and registry digests",
+    );
     const release = validateRelease(
       config,
       JSON.parse(
@@ -586,7 +600,9 @@ async function main() {
     if (action === "what-if") return;
     requireConfirmation(config, `deploy:${deploymentHash}`, values.confirm);
     requireReleaseCostApproval(config, values["accept-costs"]);
-    await updateStatus("Checking Defender coverage and private Key Vault credentials");
+    await updateStatus(
+      "Checking Defender coverage and private Key Vault credentials",
+    );
     const coverage = await reconcileProtection(client, config.protection);
     if (coverage.some((item) => item.state !== "found"))
       throw new Error(
@@ -594,7 +610,9 @@ async function main() {
       );
     await ensureSecrets(client, resourceNames.vault, false);
     if (imageReceipts.length) {
-      await updateStatus("Recording optional image evidence in private Blob storage");
+      await updateStatus(
+        "Recording optional image evidence in private Blob storage",
+      );
       const store = new BlobEvidenceStore(
         resourceNames.storage,
         client.credential,
@@ -633,7 +651,9 @@ async function main() {
       evidenceError = error.message;
     }
     const report = await collectReport(config, client, runs, store);
-    await updateStatus("Checking deployed sites and writing the evidence report");
+    await updateStatus(
+      "Checking deployed sites and writing the evidence report",
+    );
     if (evidenceError)
       report.checks.push({
         id: "Run evidence",
@@ -673,7 +693,9 @@ async function main() {
     return;
   }
   if (["inventory", "deprovision"].includes(action)) {
-    await updateStatus("Enumerating owned resources and retained subscription controls");
+    await updateStatus(
+      "Enumerating owned resources and retained subscription controls",
+    );
     const resources = await client.list(
       `${groupPath}/resources?api-version=2021-04-01`,
     );
@@ -778,7 +800,9 @@ main()
   .then(async () => {
     if (!deploymentStatus) return;
     await deploymentStatus.finish(Boolean(process.exitCode));
-    console.log(`Deployment status: ${action} ${process.exitCode ? "failed" : "completed"}`);
+    console.log(
+      `Deployment status: ${action} ${process.exitCode ? "failed" : "completed"}`,
+    );
   })
   .catch(async (error) => {
     console.error(error.message);
@@ -788,7 +812,9 @@ main()
         await deploymentStatus.finish(true);
         console.log(`Deployment status: ${action} failed`);
       } catch (statusError) {
-        console.error(`Could not update deployment status: ${statusError.message}`);
+        console.error(
+          `Could not update deployment status: ${statusError.message}`,
+        );
       }
     }
   });

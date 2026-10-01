@@ -20,16 +20,22 @@ const additionalStages = {
 };
 
 const escapeHtml = (value) =>
-  String(value).replace(/[&<>"']/g, (character) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#39;",
-  })[character]);
+  String(value).replace(
+    /[&<>"']/g,
+    (character) =>
+      ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      })[character],
+  );
 
 export function renderDeploymentStatus(state) {
-  const completed = state.stages.filter((stage) => stage.state === "succeeded").length;
+  const completed = state.stages.filter(
+    (stage) => stage.state === "succeeded",
+  ).length;
   const current = state.stages.find((stage) => stage.state === "in_progress");
   const failed = state.stages.find((stage) => stage.state === "failed");
   const title = current
@@ -37,12 +43,16 @@ export function renderDeploymentStatus(state) {
     : failed
       ? `${failed.label} needs attention`
       : "Deployment status";
-  const rows = state.stages.map((stage) => `
+  const rows = state.stages
+    .map(
+      (stage) => `
       <li class="step ${stage.state}">
         <span class="marker" aria-hidden="true"></span>
         <span class="step-body"><strong>${escapeHtml(stage.label)}</strong><small>${escapeHtml(stage.detail || "Not started")}</small></span>
         <span class="badge">${escapeHtml(stage.state.replaceAll("_", " "))}</span>
-      </li>`).join("");
+      </li>`,
+    )
+    .join("");
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -113,19 +123,31 @@ export async function createDeploymentStatus(config, output, action) {
       schemaVersion: 1,
       scope,
       updatedAt: new Date().toISOString(),
-      stages: stages.map(([id, label]) => ({ id, label, state: "pending", detail: "" })),
+      stages: stages.map(([id, label]) => ({
+        id,
+        label,
+        state: "pending",
+        detail: "",
+      })),
     };
   }
   let stage = state.stages.find((item) => item.id === action);
   if (!stage && additionalStages[action]) {
-    stage = { id: action, label: additionalStages[action], state: "pending", detail: "" };
+    stage = {
+      id: action,
+      label: additionalStages[action],
+      state: "pending",
+      detail: "",
+    };
     state.stages.push(stage);
   }
-  if (!stage) throw new Error(`Unsupported deployment status action: ${action}`);
+  if (!stage)
+    throw new Error(`Unsupported deployment status action: ${action}`);
   for (const item of state.stages) {
     if (item.state === "in_progress") {
       item.state = "failed";
-      item.detail = "Interrupted before completion. Review the previous command.";
+      item.detail =
+        "Interrupted before completion. Review the previous command.";
       item.finishedAt = new Date().toISOString();
     }
   }

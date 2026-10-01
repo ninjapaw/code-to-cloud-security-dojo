@@ -27,19 +27,37 @@ test("deployment status stays readable on desktop and mobile", async () => {
       output,
       "doctor",
     );
-    await status.observe("provision", "Foundation ARM deployed; Key Vault credentials not verified");
-    const artifacts = fileURLToPath(new URL("../output/browser/", import.meta.url));
+    await status.observe(
+      "provision",
+      "Foundation ARM deployed; Key Vault credentials not verified",
+    );
+    const artifacts = fileURLToPath(
+      new URL("../output/browser/", import.meta.url),
+    );
     await mkdir(artifacts, { recursive: true });
-    for (const [name, width, height] of [["desktop", 1440, 900], ["mobile", 390, 844]]) {
+    for (const [name, width, height] of [
+      ["desktop", 1440, 900],
+      ["mobile", 390, 844],
+    ]) {
       const page = await browser.newPage({ viewport: { width, height } });
-      await page.goto(pathToFileURL(join(output, "deployment-status.html")).href);
-      assert.match(await page.locator("body").innerText(), /Foundation ARM deployed/);
+      await page.goto(
+        pathToFileURL(join(output, "deployment-status.html")).href,
+      );
+      assert.match(
+        await page.locator("body").innerText(),
+        /Foundation ARM deployed/,
+      );
       assert.equal(
-        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= window.innerWidth,
+        ),
         true,
         `${name} deployment status must fit its viewport`,
       );
-      await page.screenshot({ path: join(artifacts, `deployment-status-${name}.png`), fullPage: true });
+      await page.screenshot({
+        path: join(artifacts, `deployment-status-${name}.png`),
+        fullPage: true,
+      });
       await page.close();
     }
     await status.finish();
@@ -82,16 +100,19 @@ test("authenticated browser consent, fixed test execution, report and logout", a
         imageDigest: `sha256:${"b".repeat(64)}`,
         observedImage: `fixture.azurecr.io/drowsy-dragon@sha256:${"b".repeat(64)}`,
         imageFindingCount: 1,
-        packages: report.drowsyDragon.trackedPackages.map(
-          (name) => ({ name, version: "fixture-1.0" }),
-        ),
-        vulnerabilities: [{
-          id: "TEST-DRAGON-UI",
-          package: "tar",
-          severity: "MEDIUM",
-          installedVersion: "fixture-1.0",
-          fixedVersion: "fixture-1.1",
-        }],
+        packages: report.drowsyDragon.trackedPackages.map((name) => ({
+          name,
+          version: "fixture-1.0",
+        })),
+        vulnerabilities: [
+          {
+            id: "TEST-DRAGON-UI",
+            package: "tar",
+            severity: "MEDIUM",
+            installedVersion: "fixture-1.0",
+            fixedVersion: "fixture-1.1",
+          },
+        ],
       });
       Object.assign(report.nginxProxy, {
         state: "observed",
@@ -103,12 +124,19 @@ test("authenticated browser consent, fixed test execution, report and logout", a
         imageFindingCount: 1,
         targetFindingObserved: true,
         packages: [{ name: "nginx", version: "1.30.3-1~noble" }],
-        vulnerabilities: [{
-          id: "CVE-2026-42533", package: "nginx", severity: "HIGH",
-          installedVersion: "1.30.3-1~noble", fixedVersion: "1.30.4-1~noble",
-        }],
+        vulnerabilities: [
+          {
+            id: "CVE-2026-42533",
+            package: "nginx",
+            severity: "HIGH",
+            installedVersion: "1.30.3-1~noble",
+            fixedVersion: "1.30.4-1~noble",
+          },
+        ],
         runtime: {
-          binaryVersion: "1.30.3", packageVersion: "1.30.3-1~noble", mapRegexEnabled: true,
+          binaryVersion: "1.30.3",
+          packageVersion: "1.30.3-1~noble",
+          mapRegexEnabled: true,
         },
       });
       return report;
@@ -133,16 +161,33 @@ test("authenticated browser consent, fixed test execution, report and logout", a
     await page.locator('input[name="password"]').fill(config.adminPassword);
     await page.locator("#login-form button").click();
     await page.locator("#workspace:not([hidden])").waitFor();
-    await page.locator("#dragon-overview").getByText("Enabled", { exact: true }).waitFor();
+    await page
+      .locator("#dragon-overview")
+      .getByText("Enabled", { exact: true })
+      .waitFor();
     await page.locator('[data-view="findings"]').click();
     await page.locator('[data-panel="findings"]').waitFor({ state: "visible" });
-    await page.locator("#dragon-findings").getByText("TEST-DRAGON-UI").waitFor();
+    await page
+      .locator("#dragon-findings")
+      .getByText("TEST-DRAGON-UI")
+      .waitFor();
     await page.locator("#proxy-findings").getByText("CVE-2026-42533").waitFor();
-    assert.match(await page.locator("#proxy-scan-status").textContent(), /association: reported/);
-    assert.match(await page.locator("#proxy-runtime").textContent(), /1\.30\.3/);
-    assert.match(await page.locator("#dragon-scan-status").textContent(), /1 tracked-package findings/);
+    assert.match(
+      await page.locator("#proxy-scan-status").textContent(),
+      /association: reported/,
+    );
+    assert.match(
+      await page.locator("#proxy-runtime").textContent(),
+      /1\.30\.3/,
+    );
+    assert.match(
+      await page.locator("#dragon-scan-status").textContent(),
+      /1 tracked-package findings/,
+    );
     assert.equal(
-      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
       true,
       "Populated Drowsy Dragon evidence must fit the mobile viewport",
     );
@@ -174,11 +219,14 @@ test("authenticated browser consent, fixed test execution, report and logout", a
       mimeType: "application/json",
       buffer: Buffer.from(JSON.stringify(after)),
     });
-    await page.locator("#comparison").getByText(
-      /Drowsy Dragon tracked-package findings: not collected -> 1/,
-    ).waitFor();
-    assert.match(await page.locator("#comparison").textContent(),
-      /NGINX Proxy tracked-package findings: not collected -> 1/);
+    await page
+      .locator("#comparison")
+      .getByText(/Drowsy Dragon tracked-package findings: not collected -> 1/)
+      .waitFor();
+    assert.match(
+      await page.locator("#comparison").textContent(),
+      /NGINX Proxy tracked-package findings: not collected -> 1/,
+    );
     await page.locator("#logout").click();
     await page.locator("#login:not([hidden])").waitFor();
     assert.equal(
@@ -244,7 +292,9 @@ test("desktop and mobile preview navigation, responsive layout and report export
         "reports",
       ]) {
         await page.locator(`[data-view="${view}"]`).click();
-        await page.locator(`[data-panel="${view}"]`).waitFor({ state: "visible" });
+        await page
+          .locator(`[data-panel="${view}"]`)
+          .waitFor({ state: "visible" });
         assert.equal(
           await page.locator(`[data-panel="${view}"]`).isVisible(),
           true,
@@ -264,24 +314,54 @@ test("desktop and mobile preview navigation, responsive layout and report export
           );
         }
         if (view === "overview") {
-          assert.match(await page.locator("#dragon-overview").textContent(), /Drowsy Dragon/);
-          assert.match(await page.locator("#dragon-overview").textContent(), /Disabled/);
-          assert.match(await page.locator("#proxy-overview").textContent(), /NGINX Proxy/);
-          assert.match(await page.locator("#proxy-overview").textContent(), /Disabled/);
+          assert.match(
+            await page.locator("#dragon-overview").textContent(),
+            /Drowsy Dragon/,
+          );
+          assert.match(
+            await page.locator("#dragon-overview").textContent(),
+            /Disabled/,
+          );
+          assert.match(
+            await page.locator("#proxy-overview").textContent(),
+            /NGINX Proxy/,
+          );
+          assert.match(
+            await page.locator("#proxy-overview").textContent(),
+            /Disabled/,
+          );
         }
         if (view === "findings") {
-          assert.match(await page.locator("#dragon-scan-status").textContent(), /Missing evidence is not zero vulnerabilities/);
-          assert.match(await page.locator("#dragon-packages").textContent(), /libgcrypt20/);
-          assert.match(await page.locator("#dragon-findings").textContent(), /no clean result is implied/);
-          assert.match(await page.locator("#proxy-findings").textContent(), /no clean result is implied/);
+          assert.match(
+            await page.locator("#dragon-scan-status").textContent(),
+            /Missing evidence is not zero vulnerabilities/,
+          );
+          assert.match(
+            await page.locator("#dragon-packages").textContent(),
+            /libgcrypt20/,
+          );
+          assert.match(
+            await page.locator("#dragon-findings").textContent(),
+            /no clean result is implied/,
+          );
+          assert.match(
+            await page.locator("#proxy-findings").textContent(),
+            /no clean result is implied/,
+          );
         }
         if (view === "lab")
           assert.equal(
             await page.locator('[data-test="health"]').isDisabled(),
             true,
           );
-        assert.equal(await page.locator('[data-test="drowsy-dragon"]').count(), 0);
-        assert.equal(await page.locator('[data-test="nginx-proxy"]').count(), 0);
+        assert.equal(
+          await page.locator('[data-test="drowsy-dragon"]').count(),
+          0,
+        );
+        assert.equal(
+          await page.locator('[data-test="nginx-proxy"]').count(),
+          0,
+        );
         await page.screenshot({
           path: `${output}/${view}-${viewport.width}.png`,
           fullPage: true,
