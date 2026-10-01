@@ -71,6 +71,7 @@ resource worker 'Microsoft.Web/sites@2024-11-01' = {
       ipSecurityRestrictionsDefaultAction: 'Deny'
       scmIpSecurityRestrictionsDefaultAction: 'Deny'
       appSettings: [
+        { name: 'WEBSITES_PORT', value: '8080' }
         { name: 'WEBSITES_ENABLE_APP_SERVICE_STORAGE', value: 'false' }
         { name: 'AZURE_CLIENT_ID', value: identity.properties.clientId }
         { name: 'DOJO_BOOTSTRAP_VAULT', value: vaultName }

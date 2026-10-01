@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { createServer } from "node:http";
 import { pathToFileURL } from "node:url";
 import { SecretClient } from "@azure/keyvault-secrets";
 import { ManagedIdentityCredential } from "@azure/identity";
@@ -26,6 +27,13 @@ export async function ensureBootstrapSecrets(secrets) {
   }
 }
 
+export function startBootstrapHealth(port = 8080, host = "0.0.0.0") {
+  return createServer((request, response) => {
+    response.writeHead(200, { "Content-Type": "text/plain" });
+    response.end("ready");
+  }).listen(port, host);
+}
+
 if (
   process.argv[1] &&
   import.meta.url === pathToFileURL(process.argv[1]).href
@@ -47,6 +55,7 @@ if (
     await ensureBootstrapSecrets(secrets);
     await ensureBootstrapSecrets(secrets);
     console.log(`DOJO_BOOTSTRAP_READY ${runId}`);
+    startBootstrapHealth();
   } catch (error) {
     console.error(
       `Private vault bootstrap failed (${error.statusCode || "unavailable"})`,

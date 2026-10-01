@@ -8,7 +8,7 @@ import {
   createDeploymentStatus,
   renderDeploymentStatus,
 } from "../scripts/lib/deployment-status.mjs";
-import { ensureBootstrapSecrets } from "../scripts/secret-bootstrap.mjs";
+import { ensureBootstrapSecrets, startBootstrapHealth } from "../scripts/secret-bootstrap.mjs";
 import {
   configHash,
   requireConfirmation,
@@ -127,6 +127,17 @@ test("private credential bootstrap is idempotent and refuses implicit rotation",
   await assert.rejects(ensureBootstrapSecrets(secrets), /explicit rotation/);
   assert.equal(values.get("admin-password").value, original);
 });
+test("private bootstrap health listener answers App Service warmup", async () => {
+  const server = startBootstrapHealth(0, "127.0.0.1");
+  try {
+    await new Promise((resolve) => server.once("listening", resolve));
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/`);
+    assert.equal(response.status, 200);
+    assert.equal(await response.text(), "ready");
+  } finally {
+    server.close();
+  }
+});
 test("temporary credential worker is private, VNet-integrated and vault-scoped", async () => {
   const worker = await readFile(
     new URL("../infra/secret-bootstrap.bicep", import.meta.url),
@@ -138,6 +149,7 @@ test("temporary credential worker is private, VNet-integrated and vault-scoped",
   assert.match(worker, /virtualNetworkSubnetId: subnet\.id/);
   assert.match(worker, /vnetRouteAllEnabled: true/);
   assert.match(worker, /alwaysOn: true/);
+  assert.match(worker, /name: 'WEBSITES_PORT', value: '8080'/);
   assert.match(worker, /applicationLogs: \{ fileSystem: \{ level: 'Information' \} \}/);
   assert.match(
     worker,
