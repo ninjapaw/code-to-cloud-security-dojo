@@ -49,6 +49,7 @@ const workerPath = `${groupPath}/providers/Microsoft.Web/sites/${workerName}`;
 const identityPath = `${groupPath}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/${workerName}-identity`;
 const vaultPath = `${groupPath}/providers/Microsoft.KeyVault/vaults/${resourceNames.vault}`;
 const registryPath = `${groupPath}/providers/Microsoft.ContainerRegistry/registries/${resourceNames.registry}`;
+const portalPlanPath = `${groupPath}/providers/Microsoft.Web/serverFarms/${resourceNames.portal}-plan`;
 const manifestPath = join(output, "secret-bootstrap.json");
 const parametersPath = join(output, "secret-bootstrap.parameters.json");
 const account = az(config, ["account", "show"], { json: true });
@@ -227,6 +228,7 @@ async function main() {
     location: config.location,
     portalName: resourceNames.portal,
     appServiceSku: config.appServiceSku,
+    restorePlan: !(await resource(portalPlanPath, "2024-11-01")),
     registryName: resourceNames.registry,
     vaultName: resourceNames.vault,
     imageDigest: manifest.digest,

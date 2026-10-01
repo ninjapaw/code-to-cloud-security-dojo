@@ -145,7 +145,9 @@ test("temporary credential worker is private, VNet-integrated and vault-scoped",
   );
   const lifecycle = await readFile(new URL("../scripts/bootstrap-secrets.mjs", import.meta.url), "utf8");
   assert.match(worker, /publicNetworkAccess: 'Disabled'/);
-  assert.match(worker, /resource plan 'Microsoft\.Web\/serverfarms@2024-11-01' = \{[\s\S]*?name: '\$\{portalName\}-plan'[\s\S]*?sku: \{ name: appServiceSku, capacity: 1 \}/);
+  assert.match(worker, /resource plan 'Microsoft\.Web\/serverfarms@2024-11-01' existing/);
+  assert.match(worker, /resource restoredPlan 'Microsoft\.Web\/serverfarms@2024-11-01' = if \(restorePlan\) \{[\s\S]*?name: '\$\{portalName\}-plan'[\s\S]*?sku: \{ name: appServiceSku, capacity: 1 \}/);
+  assert.match(worker, /dependsOn: \[pull, writeSecrets, restoredPlan\]/);
   assert.match(worker, /virtualNetworkSubnetId: subnet\.id/);
   assert.match(worker, /vnetRouteAllEnabled: true/);
   assert.match(worker, /alwaysOn: true/);

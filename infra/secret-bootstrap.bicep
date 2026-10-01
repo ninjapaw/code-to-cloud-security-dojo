@@ -3,6 +3,7 @@ param location string = resourceGroup().location
 param portalName string
 @allowed(['B2', 'B3', 'P1v3'])
 param appServiceSku string
+param restorePlan bool
 param registryName string
 param vaultName string
 @minLength(71)
@@ -14,7 +15,8 @@ var name = '${portalName}-bootstrap'
 var tags = { 'dojo.labId': labId, 'dojo.managedBy': 'code-to-cloud-security-dojo' }
 resource registry 'Microsoft.ContainerRegistry/registries@2025-04-01' existing = { name: registryName }
 resource vault 'Microsoft.KeyVault/vaults@2024-11-01' existing = { name: vaultName }
-resource plan 'Microsoft.Web/serverfarms@2024-11-01' = {
+resource plan 'Microsoft.Web/serverfarms@2024-11-01' existing = { name: '${portalName}-plan' }
+resource restoredPlan 'Microsoft.Web/serverfarms@2024-11-01' = if (restorePlan) {
   name: '${portalName}-plan'
   location: location
   tags: tags
@@ -79,7 +81,7 @@ resource worker 'Microsoft.Web/sites@2024-11-01' = {
       ]
     }
   }
-  dependsOn: [pull, writeSecrets]
+  dependsOn: [pull, writeSecrets, restoredPlan]
 }
 resource ftpPolicy 'Microsoft.Web/sites/basicPublishingCredentialsPolicies@2024-11-01' = {
   parent: worker
