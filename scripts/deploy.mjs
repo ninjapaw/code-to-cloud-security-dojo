@@ -3,6 +3,7 @@ import { resolve, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { createHash, randomBytes } from "node:crypto";
+import { AzureCliCredential } from "@azure/identity";
 import { SecretClient } from "@azure/keyvault-secrets";
 import {
   loadConfig,
@@ -245,6 +246,7 @@ async function main() {
         `infra/${template}.bicep`,
         "--parameters",
         `@${path}`,
+        ...(operation === "what-if" ? ["--no-pretty-print"] : []),
         ...(operation === "create" ? ["--mode", "Incremental"] : []),
       ],
       { json: true },
@@ -266,16 +268,11 @@ async function main() {
       "Microsoft.Security",
       ...(config.drowsyDragonEnabled ? ["Microsoft.ContainerInstance"] : []),
     ]) {
-      const state = az(config, [
-        "provider",
-        "show",
-        "--namespace",
-        namespace,
-        "--query",
-        "registrationState",
-        "--output",
-        "tsv",
-      ]);
+      const state = az(
+        config,
+        ["provider", "show", "--namespace", namespace],
+        { json: true },
+      ).registrationState;
       if (state !== "Registered")
         throw new Error(
           `Provider ${namespace} is not registered; run npm run setup:github-oidc with --apply`,
@@ -694,7 +691,7 @@ async function main() {
 async function ensureSecrets(client, vaultName, rotate) {
   const secrets = new SecretClient(
     `https://${vaultName}.vault.azure.net`,
-    client.credential,
+    new AzureCliCredential({ tenantId: client.config.tenantId }),
   );
   for (const name of ["admin-password", "session-key"]) {
     if (!rotate) {

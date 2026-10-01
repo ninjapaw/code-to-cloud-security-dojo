@@ -238,11 +238,15 @@ confirmation and cost consent:
 node scripts/deploy.mjs provision --confirm "provision:<subscription-id>:<resource-group>" --accept-costs
 ```
 
-This registers required resource providers, creates an ownership-tagged group if
-absent, previews and deploys the foundation, grants scoped data roles plus portal
-subscription Security Reader, and creates missing admin/session secrets directly
-in Key Vault. Existing valid secrets are preserved. An existing untagged group is
-not adopted. RBAC propagation can delay secret creation; rerun after propagation.
+The OIDC bootstrap registers providers, creates the ownership-tagged group and
+grants the portal subscription Security Reader role. Provision verifies that
+state, previews and deploys the foundation, then creates missing admin/session
+secrets directly in Key Vault. Existing valid secrets are preserved. An existing
+untagged group is not adopted. RBAC propagation can delay secret creation.
+If policy disables public vault access, the SDK secret step requires an approved
+VNet-connected execution path to the private endpoint; a successful ARM deployment
+alone does not complete installation. Do not expose the vault publicly or place
+secret values in deployment parameters to work around private-link access.
 
 No application image is selected in this stage. Two hosting plans, ACR, private
 endpoints, logs, storage and Key Vault incur charges even before release. Review

@@ -66,32 +66,6 @@ resource workloadNsg 'Microsoft.Network/networkSecurityGroups@2024-05-01' = {
   properties: {
     securityRules: [
       {
-        name: 'AllowVirtualNetworkOutbound'
-        properties: {
-          priority: 100
-          direction: 'Outbound'
-          access: 'Allow'
-          protocol: '*'
-          sourcePortRange: '*'
-          destinationPortRange: '*'
-          sourceAddressPrefix: 'VirtualNetwork'
-          destinationAddressPrefix: 'VirtualNetwork'
-        }
-      }
-      {
-        name: 'AllowAzureDnsOutbound'
-        properties: {
-          priority: 110
-          direction: 'Outbound'
-          access: 'Allow'
-          protocol: '*'
-          sourcePortRange: '*'
-          destinationPortRange: '53'
-          sourceAddressPrefix: 'VirtualNetwork'
-          destinationAddressPrefix: 'AzurePlatformDNS'
-        }
-      }
-      {
         name: 'DenyInternetOutbound'
         properties: {
           priority: 200
