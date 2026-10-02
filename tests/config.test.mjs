@@ -6,6 +6,7 @@ import {
   assertContext,
   assertOwned,
   names,
+  accessSettings,
 } from "../shared/config.mjs";
 
 const base = JSON.parse(
@@ -22,6 +23,66 @@ test("offline plan accepts unselected context but online fails closed", () => {
   assert.equal(validateConfig(base, { offline: true }), base);
   assert.throws(() => validateConfig(base), /tenantId/);
   assert.equal(validateConfig(config), config);
+});
+test("access defaults preserve current behavior without rewriting older configurations", () => {
+  const expected = {
+    keyVaultPublicAccess: true,
+    keyVaultRestrictToAdminIp: false,
+    dojoPublicAccess: true,
+    dojoRestrictToAdminIp: false,
+    keyVaultPublicAccessTags: { SecurityControl: "Ignore" },
+  };
+  assert.deepEqual(accessSettings(base), expected);
+  const legacy = structuredClone(config);
+  for (const key of Object.keys(expected)) delete legacy[key];
+  const before = JSON.stringify(legacy);
+  assert.equal(validateConfig(legacy), legacy);
+  assert.deepEqual(accessSettings(legacy), expected);
+  assert.equal(JSON.stringify(legacy), before);
+});
+test("public and admin-IP access switches accept only booleans", () => {
+  for (const key of [
+    "keyVaultPublicAccess",
+    "keyVaultRestrictToAdminIp",
+    "dojoPublicAccess",
+    "dojoRestrictToAdminIp",
+  ]) {
+    for (const value of [true, false]) {
+      const selected = { ...config, [key]: value };
+      assert.equal(validateConfig(selected), selected);
+      assert.equal(accessSettings(selected)[key], value);
+    }
+    for (const value of [null, "true", "false", 0, 1, [], {}]) {
+      assert.throws(
+        () => validateConfig({ ...config, [key]: value }),
+        new RegExp(`${key} must be a boolean`),
+      );
+    }
+  }
+});
+test("vault policy tags are configurable, optional and cannot change lab ownership", () => {
+  for (const tags of [{}, { NetworkException: "ApprovedForTraining" }]) {
+    const selected = { ...config, keyVaultPublicAccessTags: tags };
+    assert.equal(validateConfig(selected), selected);
+    const resolved = accessSettings(selected).keyVaultPublicAccessTags;
+    assert.deepEqual(resolved, tags);
+    assert.notEqual(resolved, tags);
+  }
+  for (const tags of [
+    null,
+    [],
+    true,
+    "SecurityControl=Ignore",
+    { SecurityControl: false },
+    { "": "Ignore" },
+    { "dojo.labId": "another-lab" },
+    { "DOJO.MANAGEDBY": "another-owner" },
+  ]) {
+    assert.throws(
+      () => validateConfig({ ...config, keyVaultPublicAccessTags: tags }),
+      /keyVaultPublicAccessTags/,
+    );
+  }
 });
 test("rejects broad, malformed and special-use admin CIDRs", () => {
   for (const adminCidr of [

@@ -9,7 +9,7 @@ import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { root, configPath, validateConfig } from "../shared/config.mjs";
+import { root, configPath, validateConfig, accessSettings } from "../shared/config.mjs";
 import { run } from "./lib/lifecycle.mjs";
 import { nginxMode } from "../shared/nginx-proxy.mjs";
 import {
@@ -161,6 +161,26 @@ async function configure(config) {
     config[key] =
       (await ask(`${label} [${config[key] || ""}]: `)) || config[key];
   }
+  const access = accessSettings(config);
+  for (const [key, label] of [
+    ["keyVaultPublicAccess", "Allow public Key Vault connections (RBAC still required)"],
+    ["keyVaultRestrictToAdminIp", "Restrict public Key Vault access to the admin IP"],
+    ["dojoPublicAccess", "Allow public WebGoat connections (deliberately vulnerable)"],
+    ["dojoRestrictToAdminIp", "Restrict public WebGoat access to the admin IP"],
+  ]) {
+    const answer = (
+      await ask(`${label}? yes/no [${access[key] ? "yes" : "no"}]: `)
+    ).toLowerCase();
+    if (answer && !["yes", "no"].includes(answer))
+      throw new Error(`Enter yes or no for ${key}`);
+    config[key] = answer ? answer === "yes" : access[key];
+  }
+  const policyTags = await ask(
+    `Public Key Vault policy tags as JSON ({} for no exception) [${JSON.stringify(access.keyVaultPublicAccessTags)}]: `,
+  );
+  config.keyVaultPublicAccessTags = policyTags
+    ? JSON.parse(policyTags)
+    : access.keyVaultPublicAccessTags;
   const dragon = (
     await ask(`Include Drowsy Dragon (no-ingress ACI; recurring charges)? yes/no [${config.drowsyDragonEnabled ? "yes" : "no"}]: `)
   ).toLowerCase();

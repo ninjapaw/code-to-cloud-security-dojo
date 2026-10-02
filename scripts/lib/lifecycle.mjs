@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import spawn from "cross-spawn";
 import { fileURLToPath } from "node:url";
-import { root, names, confirmation } from "../../shared/config.mjs";
+import { root, names, confirmation, accessSettings } from "../../shared/config.mjs";
 import { drowsyDragon } from "../../shared/drowsy-dragon.mjs";
 import { nginxProxy, nginxMode } from "../../shared/nginx-proxy.mjs";
 
@@ -176,6 +176,18 @@ export function baseParameters(config) {
   };
 }
 
+export function foundationParameters(config) {
+  const access = accessSettings(config);
+  return {
+    ...baseParameters(config),
+    operatorObjectId: config.operatorObjectId,
+    appServiceSku: config.appServiceSku,
+    keyVaultPublicAccess: access.keyVaultPublicAccess,
+    keyVaultRestrictToAdminIp: access.keyVaultRestrictToAdminIp,
+    keyVaultPublicAccessTags: access.keyVaultPublicAccessTags,
+  };
+}
+
 export function validateRelease(config, release) {
   if (
     !/^[a-f0-9]{64}$/.test(release.source?.snapshotSha256) ||
@@ -263,8 +275,11 @@ export function validateRelease(config, release) {
 
 export function releaseParameters(config, release) {
   validateRelease(config, release);
+  const access = accessSettings(config);
   return {
     ...baseParameters(config),
+    dojoPublicAccess: access.dojoPublicAccess,
+    dojoRestrictToAdminIp: access.dojoRestrictToAdminIp,
     portalDigest: release.images.portal.digest,
     dojoDigest: release.images.dojo.digest,
     sourceRepository: config.source.repository,

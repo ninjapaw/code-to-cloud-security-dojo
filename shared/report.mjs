@@ -100,7 +100,7 @@ export function emptyReport(config, mode = "not-collected") {
       "Plan enablement is not evidence of assessment or detection.",
       "No alert is not proof of prevention.",
       "GitHub connector consent, repository discovery and native scanner coverage require independent verification.",
-      "Private Dojo workload serverless vulnerability assessment is not applicable; inspect ACR assessments.",
+      "Network access does not establish serverless vulnerability assessment eligibility; inspect ACR assessments and service prerequisites.",
       "Costs are not estimated: review regional pricing and subscription-wide Defender charges before applying.",
       "Drowsy Dragon is an image/package assessment demo, not an HTTP exploit lab. Trivy snapshots do not prove Defender assessment, exploitability or runtime protection.",
       "NGINX runtime evidence is a container-reported startup snapshot, not a new binary probe. Private connectivity is required; configured vulnerability badges and requested coverage are not observed findings.",

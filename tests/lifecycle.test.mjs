@@ -15,6 +15,8 @@ import {
 } from "../scripts/secret-bootstrap.mjs";
 import {
   configHash,
+  foundationParameters,
+  releaseParameters,
   readHostedDojoHealth,
   readHostedEvidenceHealth,
   requireConfirmation,
@@ -27,6 +29,31 @@ import { ownedReaderAssignments } from "../scripts/lib/lifecycle.mjs";
 const config = JSON.parse(
   await readFile(new URL("../config/deploy.config.json", import.meta.url)),
 );
+function releaseFor(selected) {
+  return {
+    schemaVersion: 1,
+    codeRevision: "0".repeat(40),
+    configHash: configHash(selected),
+    source: {
+      ...selected.source,
+      tree: "e".repeat(40),
+      snapshotSha256: "f".repeat(64),
+      files: 1,
+    },
+    images: {
+      portal: {
+        digest: `sha256:${"a".repeat(64)}`,
+        imageId: `sha256:${"b".repeat(64)}`,
+        scanHash: "c".repeat(64),
+      },
+      dojo: {
+        digest: `sha256:${"d".repeat(64)}`,
+        imageId: `sha256:${"e".repeat(64)}`,
+        scanHash: "f".repeat(64),
+      },
+    },
+  };
+}
 test("hosted private HTTP health requires exact portal JSON", async () => {
   const url = `https://${names(config).portal}.azurewebsites.net/health/dojo`;
   const fetcher = async (target, options) => {
@@ -331,7 +358,149 @@ test("temporary credential worker is private, VNet-integrated and vault-scoped",
   assert.doesNotMatch(worker, /(?:adminIpv4Address|clientSecret|password):/);
   assert.match(lifecycle, /"webapp",\s*"delete"[\s\S]*?"--keep-empty-plan"/);
 });
-test("private App Service workloads route through an Internet-denied subnet", async () => {
+test("network settings reach only their intended deployment templates", () => {
+  for (const keyVaultPublicAccess of [false, true]) {
+    for (const keyVaultRestrictToAdminIp of [false, true]) {
+      for (const dojoPublicAccess of [false, true]) {
+        for (const dojoRestrictToAdminIp of [false, true]) {
+          const selected = {
+            ...config,
+            adminCidr: "203.0.113.10/32",
+            keyVaultPublicAccess,
+            keyVaultRestrictToAdminIp,
+            keyVaultPublicAccessTags: keyVaultPublicAccess
+              ? { NetworkException: "ApprovedForTraining" }
+              : {},
+            dojoPublicAccess,
+            dojoRestrictToAdminIp,
+          };
+          const foundation = foundationParameters(selected);
+          const release = releaseParameters(selected, releaseFor(selected));
+          assert.equal(foundation.keyVaultPublicAccess, keyVaultPublicAccess);
+          assert.equal(foundation.keyVaultRestrictToAdminIp, keyVaultRestrictToAdminIp);
+          assert.deepEqual(foundation.keyVaultPublicAccessTags, selected.keyVaultPublicAccessTags);
+          assert.equal(foundation.adminIpv4Address, "203.0.113.10");
+          assert.equal(release.dojoPublicAccess, dojoPublicAccess);
+          assert.equal(release.dojoRestrictToAdminIp, dojoRestrictToAdminIp);
+          for (const key of ["dojoPublicAccess", "dojoRestrictToAdminIp"])
+            assert.equal(Object.hasOwn(foundation, key), false);
+          for (const key of [
+            "keyVaultPublicAccess",
+            "keyVaultRestrictToAdminIp",
+            "keyVaultPublicAccessTags",
+          ])
+            assert.equal(Object.hasOwn(release, key), false);
+        }
+      }
+    }
+  }
+});
+test("vault network choices preserve RBAC and resource-only policy tags", async () => {
+  const foundation = await readFile(
+    new URL("../infra/foundation.bicep", import.meta.url),
+    "utf8",
+  );
+  const vault = foundation.match(
+    /resource vault 'Microsoft\.KeyVault\/vaults@[^']+' = \{[\s\S]*?\n\}/,
+  )?.[0];
+  assert.ok(vault, "the training vault must be declared");
+  assert.match(foundation, /param keyVaultPublicAccess bool = true/);
+  assert.match(foundation, /param keyVaultRestrictToAdminIp bool = false/);
+  assert.match(
+    foundation,
+    /param keyVaultPublicAccessTags object = \{ SecurityControl: 'Ignore' \}/,
+  );
+  assert.match(
+    vault,
+    /tags: union\(keyVaultPublicAccess \? keyVaultPublicAccessTags : \{\}, tags\)/,
+  );
+  assert.match(
+    vault,
+    /publicNetworkAccess: keyVaultPublicAccess \? 'Enabled' : 'Disabled'/,
+  );
+  assert.match(
+    vault,
+    /defaultAction: keyVaultPublicAccess && !keyVaultRestrictToAdminIp \? 'Allow' : 'Deny'/,
+  );
+  assert.match(vault, /bypass: 'None'/);
+  assert.match(
+    vault,
+    /ipRules: keyVaultPublicAccess && keyVaultRestrictToAdminIp \? \[\{ value: '\$\{adminIpv4Address\}\/32' \}\] : \[\]/,
+  );
+  assert.match(vault, /enableRbacAuthorization: true/);
+  assert.match(vault, /enableSoftDelete: true/);
+  assert.match(vault, /enablePurgeProtection: true/);
+
+  const otherResources = foundation
+    .slice(foundation.indexOf("resource registry"))
+    .replace(vault, "");
+  assert.doesNotMatch(otherResources, /SecurityControl|keyVaultPublicAccessTags/);
+  assert.match(
+    otherResources,
+    /module vaultEndpoint[\s\S]*?targetId: vault\.id, groupId: 'vault'/,
+  );
+  assert.match(
+    otherResources,
+    /resource storage[\s\S]*?networkAcls: \{ defaultAction: 'Deny'/,
+  );
+  assert.match(otherResources, /allowBlobPublicAccess: false/);
+  assert.match(otherResources, /allowSharedKeyAccess: false/);
+});
+test("configurable WebGoat ingress preserves portal, optional workload and publishing restrictions", async () => {
+  const main = await readFile(
+    new URL("../infra/main.bicep", import.meta.url),
+    "utf8",
+  );
+  const app = await readFile(
+    new URL("../infra/modules/app.bicep", import.meta.url),
+    "utf8",
+  );
+  const dojo = main.match(
+    /module dojo 'modules\/app\.bicep' = \{[\s\S]*?\n\}/,
+  )?.[0];
+  const portal = main.match(
+    /module portal 'modules\/app\.bicep' = \{[\s\S]*?\n\}/,
+  )?.[0];
+  const nginxProxy = main.match(
+    /module nginxProxy 'modules\/app\.bicep' = if \(nginxProxyEnabled\) \{[\s\S]*?\n\}/,
+  )?.[0];
+  assert.ok(dojo);
+  assert.ok(portal);
+  assert.ok(nginxProxy);
+  assert.match(main, /param dojoPublicAccess bool = true/);
+  assert.match(main, /param dojoRestrictToAdminIp bool = false/);
+  assert.match(dojo, /publicAccess: dojoPublicAccess/);
+  assert.match(dojo, /restrictToAdminIp: dojoRestrictToAdminIp/);
+  assert.match(dojo, /healthCheckPath: '\/WebGoat\/actuator\/health'/);
+  assert.match(
+    main,
+    /output dojoUrl string = 'https:\/\/\$\{dojo\.outputs\.hostName\}\/WebGoat\/'/,
+  );
+  assert.match(portal, /publicAccess: true/);
+  assert.match(portal, /restrictToAdminIp: true/);
+  assert.match(nginxProxy, /publicAccess: false/);
+  assert.match(app, /param restrictToAdminIp bool = true/);
+  assert.match(
+    app,
+    /publicNetworkAccess: publicAccess \? 'Enabled' : 'Disabled'/,
+  );
+  assert.match(
+    app,
+    /ipSecurityRestrictionsDefaultAction: publicAccess && !restrictToAdminIp \? 'Allow' : 'Deny'/,
+  );
+  assert.match(
+    app,
+    /ipSecurityRestrictions: publicAccess && restrictToAdminIp \? \[\{ name: 'AuthorizedAdmin', ipAddress: '\$\{adminIpv4Address\}\/32', action: 'Allow', priority: 100 \}\] : \[\]/,
+  );
+  assert.match(app, /scmIpSecurityRestrictionsDefaultAction: 'Deny'/);
+  assert.match(app, /scmIpSecurityRestrictionsUseMain: false/);
+  assert.match(app, /scmIpSecurityRestrictions: \[\]/);
+  assert.match(app, /httpsOnly: true/);
+  assert.match(app, /ftpsState: 'Disabled'/);
+  assert.match(app, /name: 'ftp'[\s\S]*?properties: \{ allow: false \}/);
+  assert.match(app, /name: 'scm'[\s\S]*?properties: \{ allow: false \}/);
+});
+test("App Service workloads retain their Internet-denied outbound subnet", async () => {
   const foundation = await readFile(
     new URL("../infra/foundation.bicep", import.meta.url),
     "utf8",
@@ -399,30 +568,16 @@ test("destructive confirmation is action and subscription bound", () => {
   );
 });
 test("release must carry immutable digests, scan hashes and exact config provenance", () => {
-  const release = {
-    schemaVersion: 1,
-    codeRevision: "0".repeat(40),
-    configHash: configHash(config),
-    source: {
-      ...config.source,
-      tree: "e".repeat(40),
-      snapshotSha256: "f".repeat(64),
-      files: 1,
-    },
-    images: {
-      portal: {
-        digest: `sha256:${"a".repeat(64)}`,
-        imageId: `sha256:${"b".repeat(64)}`,
-        scanHash: "c".repeat(64),
-      },
-      dojo: {
-        digest: `sha256:${"d".repeat(64)}`,
-        imageId: `sha256:${"e".repeat(64)}`,
-        scanHash: "f".repeat(64),
-      },
-    },
-  };
+  const release = releaseFor(config);
   validateRelease(config, release);
+  assert.throws(
+    () => releaseParameters({ ...config, dojoPublicAccess: false }, release),
+    /different configuration/,
+  );
+  assert.throws(
+    () => releaseParameters({ ...config, keyVaultPublicAccessTags: {} }, release),
+    /different configuration/,
+  );
   assert.throws(() =>
     validateRelease(config, { ...release, codeRevision: undefined }),
   );

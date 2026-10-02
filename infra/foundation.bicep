@@ -10,6 +10,12 @@ param operatorPrincipalType string = 'User'
 param appServiceSku string = 'B2'
 param registryName string
 param vaultName string
+@description('Allow public Key Vault connections. Entra RBAC is always required.')
+param keyVaultPublicAccess bool = true
+@description('Restrict an enabled public vault endpoint to adminIpv4Address/32.')
+param keyVaultRestrictToAdminIp bool = false
+@description('Vault-only policy tags for public access. Use an empty object when no exception is required.')
+param keyVaultPublicAccessTags object = { SecurityControl: 'Ignore' }
 param storageName string
 param portalName string
 param dojoName string
@@ -105,7 +111,8 @@ resource network 'Microsoft.Network/virtualNetworks@2024-05-01' = {
 resource vault 'Microsoft.KeyVault/vaults@2024-11-01' = {
   name: vaultName
   location: location
-  tags: tags
+  // Apply policy tags only to a public vault, without overriding lab ownership.
+  tags: union(keyVaultPublicAccess ? keyVaultPublicAccessTags : {}, tags)
   properties: {
     tenantId: subscription().tenantId
     sku: { name: 'standard', family: 'A' }
@@ -113,8 +120,12 @@ resource vault 'Microsoft.KeyVault/vaults@2024-11-01' = {
     enableSoftDelete: true
     enablePurgeProtection: true
     softDeleteRetentionInDays: 7
-    publicNetworkAccess: 'Enabled'
-    networkAcls: { defaultAction: 'Deny', bypass: 'None', ipRules: [{ value: '${adminIpv4Address}/32' }] }
+    publicNetworkAccess: keyVaultPublicAccess ? 'Enabled' : 'Disabled'
+    networkAcls: {
+      defaultAction: keyVaultPublicAccess && !keyVaultRestrictToAdminIp ? 'Allow' : 'Deny'
+      bypass: 'None'
+      ipRules: keyVaultPublicAccess && keyVaultRestrictToAdminIp ? [{ value: '${adminIpv4Address}/32' }] : []
+    }
   }
 }
 resource vaultRoles 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for grant in [

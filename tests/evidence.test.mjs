@@ -157,6 +157,14 @@ test("report escapes untrusted findings and labels incomplete collection", () =>
   assert.ok(!html.includes("<script>"));
   assert.match(html, /Not live-verified/);
 });
+test("network access is not reported as assessment eligibility", () => {
+  const report = emptyReport({ source: {}, labId: "training" });
+  assert.match(
+    report.limitations.join("\n"),
+    /Network access does not establish serverless vulnerability assessment eligibility/,
+  );
+  assert.doesNotMatch(report.limitations.join("\n"), /Private Dojo workload/);
+});
 test("alert correlation requires exact target and activity time", () => {
   const run = {
     targetResourceId: "/subscriptions/test/resource",

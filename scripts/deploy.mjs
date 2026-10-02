@@ -11,6 +11,7 @@ import {
   names,
   assertContext,
   assertOwned,
+  accessSettings,
 } from "../shared/config.mjs";
 import { AzureClient } from "../shared/azure.mjs";
 import { reconcileProtection } from "../shared/protection.mjs";
@@ -30,7 +31,7 @@ import {
 import {
   az,
   run,
-  baseParameters,
+  foundationParameters,
   configHash,
   requireConfirmation,
   validateRelease,
@@ -86,6 +87,12 @@ async function main() {
     offline: action === "plan" || action.startsWith("source-") || values.audit,
   });
   const resourceNames = names(config);
+  const access = accessSettings(config);
+  const dojoAccess = !access.dojoPublicAccess
+    ? "private network only"
+    : access.dojoRestrictToAdminIp
+      ? "admin IP only"
+      : "public internet";
   const output = fileURLToPath(
     new URL(`../output/${config.labId}/`, import.meta.url),
   );
@@ -97,6 +104,7 @@ async function main() {
           audit: true,
           config,
           names: resourceNames,
+          access,
           drowsyDragon: {
             ...drowsyDragon,
             enabled: config.drowsyDragonEnabled === true,
@@ -112,7 +120,7 @@ async function main() {
           },
           stages: allowed,
           warning:
-            "No Azure calls or writes. Two default app plans, optional NGINX Proxy plan/private endpoint, storage, logs, Key Vault, optional Drowsy Dragon ACI and subscription-wide Defender charges require approval. GitHub tenant consent is interactive; not auto-granted.",
+            `No Azure calls or writes. WebGoat website access: ${dojoAccess}; it is deliberately vulnerable, so use only disposable training accounts and data. The admin portal remains IP-restricted. Two default app plans, optional NGINX Proxy plan/private endpoint, storage, logs, Key Vault, optional Drowsy Dragon ACI and subscription-wide Defender charges require approval. GitHub tenant consent is interactive; not auto-granted.`,
         },
         null,
         2,
@@ -337,11 +345,7 @@ async function main() {
       });
       assertOwned(config, group);
     }
-    const parameters = {
-      ...baseParameters(config),
-      operatorObjectId: config.operatorObjectId,
-      appServiceSku: config.appServiceSku,
-    };
+    const parameters = foundationParameters(config);
     console.log(
       JSON.stringify(
         await deployTemplate("foundation", parameters, "what-if"),
@@ -636,7 +640,7 @@ async function main() {
       JSON.stringify(release, null, 2),
     );
     console.log(
-      `Release applied. Portal: https://${resourceNames.portal}.azurewebsites.net. Run verify and sign in to validate private connectivity. Do not infer runtime health from deployment success.`,
+      `Release applied. Portal: https://${resourceNames.portal}.azurewebsites.net. WebGoat (${dojoAccess}): https://${resourceNames.dojo}.azurewebsites.net/WebGoat/. Use separate disposable lesson accounts, not portal credentials. Run verify and sign in to validate private connectivity. Do not infer runtime health from deployment success.`,
     );
     return;
   }

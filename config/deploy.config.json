@@ -8,6 +8,13 @@
   "adminCidr": "",
   "operatorObjectId": "",
   "appServiceSku": "B2",
+  "keyVaultPublicAccess": true,
+  "keyVaultRestrictToAdminIp": false,
+  "keyVaultPublicAccessTags": {
+    "SecurityControl": "Ignore"
+  },
+  "dojoPublicAccess": true,
+  "dojoRestrictToAdminIp": false,
   "drowsyDragonEnabled": false,
   "nginxProxyEnabled": false,
   "nginxProxyMode": "vulnerable",

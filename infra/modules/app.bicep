@@ -3,6 +3,7 @@ param location string
 param labId string
 param image string
 param publicAccess bool
+param restrictToAdminIp bool = true
 param adminIpv4Address string
 param port string
 param workspaceId string
@@ -34,9 +35,11 @@ resource app 'Microsoft.Web/sites@2024-11-01' = {
       ftpsState: 'Disabled'
       minTlsVersion: '1.2'
       scmMinTlsVersion: '1.2'
-      ipSecurityRestrictionsDefaultAction: 'Deny'
+      ipSecurityRestrictionsDefaultAction: publicAccess && !restrictToAdminIp ? 'Allow' : 'Deny'
       scmIpSecurityRestrictionsDefaultAction: 'Deny'
-      ipSecurityRestrictions: publicAccess ? [{ name: 'AuthorizedAdmin', ipAddress: '${adminIpv4Address}/32', action: 'Allow', priority: 100 }] : []
+      scmIpSecurityRestrictionsUseMain: false
+      scmIpSecurityRestrictions: []
+      ipSecurityRestrictions: publicAccess && restrictToAdminIp ? [{ name: 'AuthorizedAdmin', ipAddress: '${adminIpv4Address}/32', action: 'Allow', priority: 100 }] : []
       appSettings: concat([
         { name: 'WEBSITES_PORT', value: port }
         { name: 'WEBSITES_ENABLE_APP_SERVICE_STORAGE', value: 'false' }

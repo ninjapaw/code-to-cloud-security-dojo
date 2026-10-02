@@ -1,12 +1,13 @@
 # Code to Cloud Security Dojo
 
 > **Authorized training only.** WebGoat is deliberately vulnerable. Use a dedicated
-> training subscription, never production data or credentials. Keep WebGoat private
-> and remove the lab when finished. This is an independent community project, not
-> a Microsoft or OWASP product, endorsement or security assurance.
+> training subscription, never production data or credentials. The deployed WebGoat
+> website is public by default. Use disposable lesson accounts and remove the lab
+> when finished. This is an independent community project, not a Microsoft or OWASP
+> product, endorsement or security assurance.
 
 A lifecycle wizard and separate admin portal follow pinned WebGoat
-source through scanning, ACR, a private App Service runtime, Defender observations,
+source through scanning, ACR, a configurable HTTPS App Service runtime, Defender observations,
 bounded test requests and executive evidence reports.
 
 [Drowsy Dragon](apps/drowsy-dragon/README.md) adds an opt-in, digest-pinned
@@ -68,9 +69,10 @@ The `dojo` workload uses a pinned WebGoat source snapshot. The Node/Express
 - Optional NGINX Proxy on a third, separate App Service plan with private ingress
   and its own ACR-only identity. It proxies its original dashboard, not the other
   workloads. Its private endpoint reuses the App Service DNS zone/VNet link.
-- Private Dojo workload endpoint with public access disabled. WebWolf is not exposed.
+- Public HTTPS Dojo website by default, with its private endpoint retained
+  for portal-to-workload traffic. WebWolf is not exposed; SCM/FTP publishing stays blocked.
 - Portal VNet integration and a single authorized public IPv4 `/32` restriction.
-- Key Vault with RBAC, purge protection, private endpoint and operator-IP firewall.
+- Key Vault with RBAC, purge protection, private endpoint and authenticated public access by default.
 - Random admin password and session signing key generated directly into Key Vault
   through the SDK. No secret arguments, committed credentials or local secret files.
 - Versionless Key Vault references for the portal; managed identity for Azure/Blob
@@ -218,6 +220,46 @@ The wizard separately offers `nginxProxyEnabled` and `nginxProxyMode`
 (`vulnerable` or `remediated`). Rerun approved provisioning when enabling NGINX
 to create its additional plan and identity. Defaults do not enable either demo.
 
+#### Network Access Settings
+
+The wizard also configures the following settings. Edit them in the ignored
+`config/deploy.local.json`, or select another JSON file with `DOJO_CONFIG`.
+Older files that omit these fields use the defaults below without being rewritten.
+The [deployment workflow](.github/workflows/deploy.yml) preserves these fields
+from [committed defaults](config/deploy.config.json) in its per-run configuration.
+Direct Bicep deployments accept the same parameter names: vault settings belong
+to [foundation.bicep](infra/foundation.bicep), and Dojo settings to
+[main.bicep](infra/main.bicep).
+
+| Setting | Default | Effect |
+| --- | --- | --- |
+| `keyVaultPublicAccess` | `true` | Enable the vault's public endpoint; `false` requires private connectivity. |
+| `keyVaultRestrictToAdminIp` | `false` | When public access is enabled, `true` limits it to the configured admin `/32`; `false` allows all networks. |
+| `keyVaultPublicAccessTags` | `{"SecurityControl":"Ignore"}` | Vault-only tags for your public-network policy exception. Use `{}` for no exception, or provide your organization's reviewed tags. |
+| `dojoPublicAccess` | `true` | Enable the WebGoat website's public endpoint; `false` requires private connectivity. |
+| `dojoRestrictToAdminIp` | `false` | When public access is enabled, `true` limits it to the configured admin `/32`; `false` allows all networks. |
+
+Public-access switches must be JSON booleans, not `"true"`/`"false"` strings.
+Policy tags must have nonempty names and string values, and cannot override lab
+ownership tags. They are not applied when `keyVaultPublicAccess` is `false`.
+Changing tags does not bypass a policy that does not recognize them.
+
+For a private-only deployment, set both `keyVaultPublicAccess` and
+`dojoPublicAccess` to `false`. For admin-IP-only public endpoints, leave those
+two switches `true` and set both `RestrictToAdminIp` switches to `true`.
+The restriction switches have no effect while their public endpoint is disabled.
+RBAC, purge protection, HTTPS, private endpoints, outbound isolation and SCM/FTP
+restrictions remain enabled; the portal stays admin-IP-only and NGINX stays private.
+
+Run `npm run plan` to see the resolved choices before deploying. Vault changes
+require an approved `provision`; website changes require an approved `deploy`.
+Configuration changes invalidate existing release manifests, so rebuild and
+review the release for the new configuration. A private vault also requires
+the private execution/bootstrap path described below.
+SDK provisioning and rotation must run from an allowed IP or approved private
+path for restricted vaults; public GitHub-hosted runners are not automatically
+allowlisted.
+
 The bootstrap operator needs resource creation and role-assignment rights at the
 lab group, subscription role-assignment rights for portal Security Reader, and
 Security Admin or equivalent rights for the separately approved Defender pricing
@@ -251,7 +293,7 @@ grants the portal subscription Security Reader role. Provision verifies that
 state, previews and deploys the foundation, then creates missing admin/session
 secrets directly in Key Vault. Existing valid secrets are preserved. An existing
 untagged group is not adopted. RBAC propagation can delay secret creation.
-If policy disables public vault access, the SDK secret step requires an approved
+If configuration or policy disables public vault access, the SDK secret step requires an approved
 VNet-connected execution path to the private endpoint; a successful ARM deployment
 alone does not complete installation. Do not expose the vault publicly or place
 secret values in deployment parameters to work around private-link access.
@@ -391,16 +433,41 @@ directly through an authorized Key Vault session, then sign in as `admin`. Never
 send credentials through chat, command-line arguments, reports or browser JavaScript.
 Sessions last one hour; logout revokes the stored session.
 
+In the Azure portal, open the lab's Key Vault, then **Secrets > admin-password >
+current version > Show Secret Value**. By default the vault accepts public
+connections from all networks. An admin-IP-only profile requires the configured
+IP, and a private-only profile requires approved private connectivity. Reading a
+secret always requires an authenticated Entra identity with Key Vault data-plane
+permissions. Public access is not anonymous access.
+
+By default the foundation tags only the public training vault with `SecurityControl=Ignore`, the
+inherited management policy's explicit exception, so that policy does not rewrite
+`publicNetworkAccess` to `Disabled`. Customize or disable these tags with
+`keyVaultPublicAccessTags`; private-only vaults do not receive them.
+RBAC, purge protection and the private endpoint
+remain enabled. This exception does not apply to the resource group, evidence
+storage or workloads; the portal's admin-IP restriction is unchanged. Do not use
+this training configuration for production credentials.
+
 Follow Source, Build & Assess, Cloud Posture, Runtime Validation, Remediate & Compare,
 and Report & Retire. Refresh collects actual configuration and evidence. API errors,
 permission failures, incomplete queries, missing assessments and pending scans must
 not be converted into passing results. A configured control is not a demonstrated
 detection. Subscription Security Reader is read-only but broad; review its boundary.
 
-The Dojo workload is private and is not reverse-proxied into the portal. Interactive
-WebGoat lessons need a separately approved private network route and DNS access to
-the VNet, such as an existing training VPN. A portal link is not a network tunnel.
-The fixed test runner uses private connectivity. From the authorized `/32`,
+Open the printed WebGoat URL
+(`https://<dojo-app-name>.azurewebsites.net/WebGoat/`) for interactive lessons.
+The release IaC also returns it as `dojoUrl`. WebGoat uses its own lesson accounts:
+create disposable training credentials, never reuse the portal admin password.
+The default profile permits all public IPs over HTTPS. Admin-IP-only and private
+profiles require their configured network path. Its private endpoint and
+Internet-denied outbound subnet remain in place; it is not reverse-proxied into
+the portal. The shared app module keeps `restrictToAdminIp` enabled by default,
+and the Dojo deployment chooses its value from `dojoRestrictToAdminIp`.
+The portal retains its admin-IP restriction,
+the optional NGINX Proxy stays private, and SCM/FTP access remains blocked.
+
+The fixed test runner still uses private connectivity. From the authorized `/32`,
 `GET /health/dojo` on the portal checks only the fixed private Dojo health path
 over its VNet integration: HTTP 200 means the Dojo responded; 503 or a redirect
 does not. No credentials, attack request or Blob evidence are involved. The
@@ -411,8 +478,8 @@ portal returns only whether its managed identity can read private evidence-conta
 metadata; it does not list or expose run records. The verifier reports that
 connectivity separately and still requires an authenticated portal session for full run
 evidence. WebWolf on port 9090 is not exposed;
-use upstream localhost instructions for dependent lessons. Never weaken isolation
-to make an exercise or attack-path finding appear.
+use upstream localhost instructions for dependent lessons. Do not broaden the
+remaining isolation controls to make an exercise or attack-path finding appear.
 
 ### Run Tests and Compare Evidence
 
@@ -444,10 +511,11 @@ revision differences alone do not prove remediation. Export HTML for browser PDF
 printing and JSON for archival; retain failed/incomplete reports and the full Blob
 audit history, not just the latest 100 runs displayed in the portal.
 
-The private workload is ineligible for current serverless vulnerability assessment;
-use ACR image assessment without making it public. Other posture/App Service
-capabilities require independent checks. No Kubernetes sensor, generated attack path
-or complete source-to-App-Service runtime mapping is guaranteed by image labels.
+Public reachability alone does not establish eligibility for serverless vulnerability
+assessment. Verify service prerequisites and actual assessments; ACR image assessment
+is separate evidence. Other posture/App Service capabilities require independent
+checks. No Kubernetes sensor, generated attack path or complete source-to-App-Service
+runtime mapping is guaranteed by image labels.
 
 ### Rotate Credentials and Clean Up
 
@@ -495,8 +563,15 @@ retained permissions/services and continuing charges afterward.
 
 ## Troubleshooting
 
-- **403:** check the public admin IP, private DNS/endpoints and RBAC propagation.
-  Do not disable the firewall or publicize the workload as a workaround.
+- **Portal/private-workload 403:** check the public admin IP, private DNS/endpoints
+  and RBAC propagation. Do not broaden those endpoints as a workaround.
+- **Public WebGoat 403:** verify the deployed settings match `dojoPublicAccess`
+  and `dojoRestrictToAdminIp`. Admin-IP-only access requires the configured `/32`;
+  private-only access requires the VNet path. SCM must still default to `Deny`.
+- **Key Vault secret 403:** verify the deployed network mode matches your vault
+  configuration, any required policy exception is present, and your identity has
+  Key Vault data-plane read permissions. Use the approved IP or private route for
+  restricted profiles. A public endpoint does not grant access to secrets.
 - **Unresolved Key Vault reference:** check the portal identity's Secrets User role,
   enabled/unexpired secrets, private DNS and VNet routing. Startup fails closed.
 - **Unknown report checks:** inspect Reader/Security Reader permissions, API

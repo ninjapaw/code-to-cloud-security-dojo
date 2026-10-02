@@ -20,11 +20,19 @@ front of WebGoat or the admin portal. Do not give it portal credentials or
 evidence/Defender-write roles. A package pin, configured dashboard badge or
 startup snapshot is not proof of exploitation or a Defender finding.
 
-Use a dedicated Azure training subscription and narrowly scoped identities. Keep
-the workload private and the portal restricted to the approved admin IP. Validate
-network access, egress, identity isolation, Key Vault references and credential
-rotation on a disposable target before a workshop. Local tests are not a security
-certification or proof of live protection.
+Use a dedicated Azure training subscription and narrowly scoped identities. The
+WebGoat website accepts public HTTPS connections by default for this demo; it
+is not a hardened internet service. Deployment configuration can instead select
+admin-IP-only or private access for WebGoat and Key Vault. Vault public-access
+policy tags are optional, resource-scoped and omitted for private-only vaults;
+they never grant permission to read secrets. Use disposable lesson accounts and synthetic
+data, never the portal admin credential, and remove the lab after training.
+Keep the portal restricted to the approved admin IP, the optional NGINX workload
+private, and SCM/FTP publishing blocked. Retain WebGoat's private endpoint,
+Internet-denied outbound subnet and pull-only identity. Validate network access,
+egress, identity isolation, Key Vault references and credential rotation on a
+disposable target before a workshop. Local tests are not a security certification
+or proof of live protection.
 
 ## Reporting
 

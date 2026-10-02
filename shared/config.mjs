@@ -44,6 +44,7 @@ export function validateConfig(config, { offline = false } = {}) {
   }
   if (!["B2", "B3", "P1v3"].includes(config.appServiceSku))
     throw new Error("Unsupported App Service SKU");
+  accessSettings(config);
   if (
     config.drowsyDragonEnabled !== undefined &&
     typeof config.drowsyDragonEnabled !== "boolean"
@@ -90,6 +91,40 @@ export function validateConfig(config, { offline = false } = {}) {
       throw new Error(`Required Defender extension: ${extension}`);
   }
   return config;
+}
+
+export function accessSettings(config) {
+  const settings = {};
+  for (const [key, fallback] of [
+    ["keyVaultPublicAccess", true],
+    ["keyVaultRestrictToAdminIp", false],
+    ["dojoPublicAccess", true],
+    ["dojoRestrictToAdminIp", false],
+  ]) {
+    const value = config[key] === undefined ? fallback : config[key];
+    if (typeof value !== "boolean")
+      throw new Error(`${key} must be a boolean`);
+    settings[key] = value;
+  }
+  const tags =
+    config.keyVaultPublicAccessTags === undefined
+      ? { SecurityControl: "Ignore" }
+      : config.keyVaultPublicAccessTags;
+  if (
+    !tags ||
+    typeof tags !== "object" ||
+    Array.isArray(tags) ||
+    Object.entries(tags).some(
+      ([key, value]) =>
+        !key.trim() ||
+        typeof value !== "string" ||
+        /^dojo\.(labId|managedBy)$/i.test(key),
+    )
+  )
+    throw new Error(
+      "keyVaultPublicAccessTags must be an object of nonempty tag names and string values, without dojo.labId or dojo.managedBy overrides",
+    );
+  return { ...settings, keyVaultPublicAccessTags: { ...tags } };
 }
 
 export async function loadConfig(options) {

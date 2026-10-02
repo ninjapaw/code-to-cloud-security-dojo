@@ -9,6 +9,7 @@ import {
   publicationFindings,
   reviewedUpstreamMarker,
 } from "../scripts/check-public.mjs";
+import { accessSettings } from "../shared/config.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 test("publication exception is bound to the reviewed upstream file and exact bytes", async () => {
@@ -98,6 +99,49 @@ test("deployment workflow is OIDC-only, staged and approval-gated", async () => 
     validation,
     /github\.ref == 'refs\/heads\/dev'.*inputs\.drowsy-dragon/,
   );
+});
+test("offline plans honor public, admin-IP-only and private access configuration", async () => {
+  const temporary = await mkdtemp(join(tmpdir(), "dojo-access-plan-"));
+  const path = join(temporary, "config.json");
+  const base = JSON.parse(
+    await readFile(join(root, "config/deploy.config.json"), "utf8"),
+  );
+  try {
+    for (const [publicAccess, restrictToAdminIp, expected] of [
+      [true, false, "public internet"],
+      [true, true, "admin IP only"],
+      [false, false, "private network only"],
+      [false, true, "private network only"],
+    ]) {
+      const selected = {
+        ...base,
+        keyVaultPublicAccess: publicAccess,
+        keyVaultRestrictToAdminIp: restrictToAdminIp,
+        keyVaultPublicAccessTags: {},
+        dojoPublicAccess: publicAccess,
+        dojoRestrictToAdminIp: restrictToAdminIp,
+      };
+      await writeFile(path, JSON.stringify(selected));
+      const result = spawnSync(
+        process.execPath,
+        [join(root, "scripts/deploy.mjs"), "plan"],
+        {
+          cwd: temporary,
+          encoding: "utf8",
+          env: { ...process.env, DOJO_CONFIG: path, PATH: "" },
+        },
+      );
+      assert.equal(result.status, 0, result.stderr);
+      const plan = JSON.parse(result.stdout);
+      assert.deepEqual(plan.config, selected);
+      assert.deepEqual(plan.access, accessSettings(selected));
+      assert.ok(plan.warning.includes(`WebGoat website access: ${expected}`));
+      assert.match(plan.warning, /admin portal remains IP-restricted/);
+    }
+    await assert.rejects(stat(join(temporary, "output")));
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
 });
 test("all mutation audits are offline and do not write outputs", async () => {
   const temporary = await mkdtemp(join(tmpdir(), "dojo-audit-"));

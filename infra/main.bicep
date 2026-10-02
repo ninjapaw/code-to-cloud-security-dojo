@@ -8,6 +8,10 @@ param vaultName string
 param storageName string
 param portalName string
 param dojoName string
+@description('Allow public connections to the deliberately vulnerable WebGoat training website.')
+param dojoPublicAccess bool = true
+@description('Restrict an enabled public WebGoat endpoint to adminIpv4Address/32.')
+param dojoRestrictToAdminIp bool = false
 @minLength(71)
 @maxLength(71)
 param portalDigest string
@@ -56,11 +60,13 @@ module dojo 'modules/app.bicep' = {
     location: location
     labId: labId
     image: '${registry.properties.loginServer}/dojo@${dojoDigest}'
-    publicAccess: false
+    publicAccess: dojoPublicAccess
+    restrictToAdminIp: dojoRestrictToAdminIp
     adminIpv4Address: adminIpv4Address
     workspaceId: workspace.id
     port: '8080'
     subnetId: workloads.id
+    healthCheckPath: '/WebGoat/actuator/health'
     settings: [
       { name: 'WEBGOAT_HOST', value: '${dojoName}.azurewebsites.net' }
       { name: 'WEBWOLF_HOST', value: 'localhost' }
@@ -79,6 +85,7 @@ module portal 'modules/app.bicep' = {
     labId: labId
     image: '${registry.properties.loginServer}/control-portal@${portalDigest}'
     publicAccess: true
+    restrictToAdminIp: true
     adminIpv4Address: adminIpv4Address
     workspaceId: workspace.id
     port: '8080'
@@ -153,4 +160,5 @@ module nginxProxyEndpoint 'modules/private-endpoint.bicep' = if (nginxProxyEnabl
   dependsOn: [dojoEndpoint]
 }
 output portalUrl string = 'https://${portal.outputs.hostName}'
+output dojoUrl string = 'https://${dojo.outputs.hostName}/WebGoat/'
 output dojoResourceId string = dojo.outputs.id
