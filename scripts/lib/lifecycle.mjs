@@ -44,7 +44,14 @@ export function configHash(config) {
   return createHash("sha256").update(JSON.stringify(config)).digest("hex");
 }
 
-async function readHostedHealth(config, path, expected, successDetail, failureDetail, fetcher) {
+async function readHostedHealth(
+  config,
+  path,
+  expected,
+  successDetail,
+  failureDetail,
+  fetcher,
+) {
   const response = await fetcher(
     `https://${names(config).portal}.azurewebsites.net/health/${path}`,
     { method: "GET", redirect: "manual", signal: AbortSignal.timeout(15000) },
@@ -80,11 +87,25 @@ async function readHostedHealth(config, path, expected, successDetail, failureDe
 }
 
 export function readHostedDojoHealth(config, fetcher = fetch) {
-  return readHostedHealth(config, "dojo", "healthy", "Portal reached private Dojo health over VNet (HTTP 200)", "Private Dojo did not return HTTP 200", fetcher);
+  return readHostedHealth(
+    config,
+    "dojo",
+    "healthy",
+    "Portal reached private Dojo health over VNet (HTTP 200)",
+    "Private Dojo did not return HTTP 200",
+    fetcher,
+  );
 }
 
 export function readHostedEvidenceHealth(config, fetcher = fetch) {
-  return readHostedHealth(config, "evidence", "accessible", "Portal can read private Blob evidence over VNet", "Portal could not read private Blob evidence", fetcher);
+  return readHostedHealth(
+    config,
+    "evidence",
+    "accessible",
+    "Portal can read private Blob evidence over VNet",
+    "Portal could not read private Blob evidence",
+    fetcher,
+  );
 }
 
 export async function verifiedPrivateSecrets(client, config, vaultName, runId) {

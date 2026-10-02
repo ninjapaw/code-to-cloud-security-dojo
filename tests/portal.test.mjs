@@ -80,7 +80,9 @@ test("private evidence health discloses no runs and fails closed", async () => {
     const healthy = await fetch(url);
     assert.equal(healthy.status, 200);
     assert.deepEqual(await healthy.json(), { status: "accessible" });
-    store.list = async () => { throw new Error("private failure with sensitive detail"); };
+    store.list = async () => {
+      throw new Error("private failure with sensitive detail");
+    };
     const unavailable = await fetch(url);
     assert.equal(unavailable.status, 503);
     assert.deepEqual(await unavailable.json(), { status: "unavailable" });
