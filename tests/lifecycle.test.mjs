@@ -16,6 +16,7 @@ import {
 import {
   configHash,
   readHostedDojoHealth,
+  readHostedEvidenceHealth,
   requireConfirmation,
   validateRelease,
   verifiedPrivateSecrets,
@@ -60,6 +61,15 @@ test("hosted private HTTP health requires exact portal JSON", async () => {
     ).state,
     "unknown",
   );
+});
+test("hosted private Blob health reveals only reachability", async () => {
+  const url = `https://${names(config).portal}.azurewebsites.net/health/evidence`;
+  assert.equal((await readHostedEvidenceHealth(config, async (target) => {
+    assert.equal(target, url);
+    return Response.json({ status: "accessible" });
+  })).state, "observed");
+  assert.equal((await readHostedEvidenceHealth(config, async () => new Response(null, { status: 503 }))).state, "gap");
+  assert.equal((await readHostedEvidenceHealth(config, async () => new Response("<html>fallback</html>"))).state, "unknown");
 });
 test("hostnames accept Azure-generated names but reject foreign sites and suffix attacks", () => {
   const name = "dojo-123456789abc-app";

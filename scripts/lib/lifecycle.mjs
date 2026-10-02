@@ -44,14 +44,14 @@ export function configHash(config) {
   return createHash("sha256").update(JSON.stringify(config)).digest("hex");
 }
 
-export async function readHostedDojoHealth(config, fetcher = fetch) {
+async function readHostedHealth(config, path, expected, successDetail, failureDetail, fetcher) {
   const response = await fetcher(
-    `https://${names(config).portal}.azurewebsites.net/health/dojo`,
+    `https://${names(config).portal}.azurewebsites.net/health/${path}`,
     { method: "GET", redirect: "manual", signal: AbortSignal.timeout(15000) },
   );
   if (response.status === 503) {
     await response.body?.cancel();
-    return { state: "gap", detail: "Private Dojo did not return HTTP 200" };
+    return { state: "gap", detail: failureDetail };
   }
   if (
     response.status !== 200 ||
@@ -65,18 +65,26 @@ export async function readHostedDojoHealth(config, fetcher = fetch) {
   }
   try {
     const result = await response.json();
-    return result?.status === "healthy"
+    return result?.status === expected
       ? {
           state: "observed",
-          detail: "Portal reached private Dojo health over VNet (HTTP 200)",
+          detail: successDetail,
         }
-      : { state: "gap", detail: "Portal did not confirm private Dojo health" };
+      : { state: "gap", detail: failureDetail };
   } catch {
     return {
       state: "unknown",
       detail: "Portal health response was not valid JSON",
     };
   }
+}
+
+export function readHostedDojoHealth(config, fetcher = fetch) {
+  return readHostedHealth(config, "dojo", "healthy", "Portal reached private Dojo health over VNet (HTTP 200)", "Private Dojo did not return HTTP 200", fetcher);
+}
+
+export function readHostedEvidenceHealth(config, fetcher = fetch) {
+  return readHostedHealth(config, "evidence", "accessible", "Portal can read private Blob evidence over VNet", "Portal could not read private Blob evidence", fetcher);
 }
 
 export async function verifiedPrivateSecrets(client, config, vaultName, runId) {

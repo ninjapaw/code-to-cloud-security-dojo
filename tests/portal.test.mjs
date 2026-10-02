@@ -65,6 +65,29 @@ test("portal health checks the private Dojo without writing run evidence", async
     server.close();
   }
 });
+test("private evidence health discloses no runs and fails closed", async () => {
+  const store = new MemoryEvidenceStore();
+  await store.put("runs/private.json", { secret: "not-exposed" });
+  const app = createApp({
+    config,
+    store,
+    reportProvider: async () => emptyReport(config),
+  });
+  const server = app.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  try {
+    const url = `http://127.0.0.1:${server.address().port}/health/evidence`;
+    const healthy = await fetch(url);
+    assert.equal(healthy.status, 200);
+    assert.deepEqual(await healthy.json(), { status: "accessible" });
+    store.list = async () => { throw new Error("private failure with sensitive detail"); };
+    const unavailable = await fetch(url);
+    assert.equal(unavailable.status, 503);
+    assert.deepEqual(await unavailable.json(), { status: "unavailable" });
+  } finally {
+    server.close();
+  }
+});
 test("admin authorization, CSRF, logout revocation and fixed target boundary", async () => {
   const store = new MemoryEvidenceStore();
   let requests = 0;

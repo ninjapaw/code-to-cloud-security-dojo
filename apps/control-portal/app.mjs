@@ -70,6 +70,15 @@ export function createApp({
       return response.status(503).json({ status: "unavailable" });
     }
   });
+  app.get("/health/evidence", async (_request, response) => {
+    if (preview) return response.status(503).json({ status: "unavailable" });
+    try {
+      await store.list("runs/", 1);
+      return response.json({ status: "accessible" });
+    } catch {
+      return response.status(503).json({ status: "unavailable" });
+    }
+  });
   app.use(
     "/api",
     rateLimit({

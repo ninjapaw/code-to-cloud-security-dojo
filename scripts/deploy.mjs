@@ -39,6 +39,7 @@ import {
   requireReleaseCostApproval,
   verifiedPrivateSecrets,
   readHostedDojoHealth,
+  readHostedEvidenceHealth,
 } from "./lib/lifecycle.mjs";
 
 const { values, positionals } = parseArgs({
@@ -690,6 +691,18 @@ async function main() {
         id: "Dojo private HTTP",
         state: "unknown",
         detail: "Portal-originated private health check unavailable",
+      });
+    }
+    try {
+      report.checks.push({
+        id: "Evidence storage via portal",
+        ...(await readHostedEvidenceHealth(config)),
+      });
+    } catch {
+      report.checks.push({
+        id: "Evidence storage via portal",
+        state: "unknown",
+        detail: "Portal-originated private evidence check unavailable",
       });
     }
     await mkdir(output, { recursive: true });
