@@ -24,9 +24,9 @@ resource app 'Microsoft.Web/sites@2024-11-01' = {
     httpsOnly: true
     publicNetworkAccess: publicAccess ? 'Enabled' : 'Disabled'
     virtualNetworkSubnetId: empty(subnetId) ? null : subnetId
+    outboundVnetRouting: { applicationTraffic: !empty(subnetId) }
     keyVaultReferenceIdentity: identity.id
     siteConfig: {
-      vnetRouteAllEnabled: !empty(subnetId)
       linuxFxVersion: 'DOCKER|${image}'
       acrUseManagedIdentityCreds: true
       acrUserManagedIdentityID: identity.properties.clientId

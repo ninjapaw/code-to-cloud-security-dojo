@@ -338,7 +338,11 @@ test("temporary credential worker is private, VNet-integrated and vault-scoped",
   );
   assert.match(worker, /dependsOn: \[pull, writeSecrets, restoredPlan\]/);
   assert.match(worker, /virtualNetworkSubnetId: subnet\.id/);
-  assert.match(worker, /vnetRouteAllEnabled: true/);
+  assert.match(
+    worker,
+    /virtualNetworkSubnetId: subnet\.id\s+outboundVnetRouting: \{ applicationTraffic: true \}\s+siteConfig: \{/,
+  );
+  assert.doesNotMatch(worker, /vnetRouteAllEnabled/);
   assert.match(worker, /alwaysOn: true/);
   assert.match(worker, /name: 'WEBSITES_PORT', value: '8080'/);
   assert.match(
@@ -519,7 +523,11 @@ test("App Service workloads retain their Internet-denied outbound subnet", async
   assert.match(main, /resource workloads .*name: 'workloads'/);
   assert.match(main, /module dojo[\s\S]*?subnetId: workloads\.id/);
   assert.match(main, /module nginxProxy[\s\S]*?subnetId: workloads\.id/);
-  assert.match(app, /vnetRouteAllEnabled: !empty\(subnetId\)/);
+  assert.match(
+    app,
+    /virtualNetworkSubnetId: empty\(subnetId\) \? null : subnetId\s+outboundVnetRouting: \{ applicationTraffic: !empty\(subnetId\) \}/,
+  );
+  assert.doesNotMatch(app, /vnetRouteAllEnabled/);
 });
 test("teardown removes only the owned subscription role for the exact principal", () => {
   const scope = `/subscriptions/${config.subscriptionId}`;

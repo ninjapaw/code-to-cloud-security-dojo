@@ -250,6 +250,10 @@ two switches `true` and set both `RestrictToAdminIp` switches to `true`.
 The restriction switches have no effect while their public endpoint is disabled.
 RBAC, purge protection, HTTPS, private endpoints, outbound isolation and SCM/FTP
 restrictions remain enabled; the portal stays admin-IP-only and NGINX stays private.
+Application routing uses the App Service site's
+`outboundVnetRouting.applicationTraffic` property, rather than the legacy nested
+route-all setting. Image-pull and other configuration traffic are controlled
+separately, so registry pulls do not enter the workload's Internet-denied subnet.
 
 Run `npm run plan` to see the resolved choices before deploying. Vault changes
 require an approved `provision`; website changes require an approved `deploy`.

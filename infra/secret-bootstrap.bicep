@@ -61,8 +61,8 @@ resource worker 'Microsoft.Web/sites@2024-11-01' = {
     httpsOnly: true
     publicNetworkAccess: 'Disabled'
     virtualNetworkSubnetId: subnet.id
+    outboundVnetRouting: { applicationTraffic: true }
     siteConfig: {
-      vnetRouteAllEnabled: true
       linuxFxVersion: 'DOCKER|${registry.properties.loginServer}/secret-bootstrap@${imageDigest}'
       acrUseManagedIdentityCreds: true
       acrUserManagedIdentityID: identity.properties.clientId
