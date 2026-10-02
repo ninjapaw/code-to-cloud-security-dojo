@@ -37,7 +37,8 @@ export async function stampBootstrapSecrets(secrets, runId) {
     if (
       verified.properties.tags?.bootstrapRunId !== runId ||
       verified.value !== current.value
-    ) throw new Error("Private credential metadata readback failed");
+    )
+      throw new Error("Private credential metadata readback failed");
   }
 }
 

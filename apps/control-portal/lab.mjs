@@ -27,6 +27,20 @@ export const tests = [
   },
 ];
 
+export async function readDojoHealth(config, fetcher = fetch) {
+  if (!isLabHostname(config.dojoHost, config.dojoName))
+    throw new Error("Invalid fixed training target");
+  const response = await fetcher(
+    `https://${config.dojoHost}/WebGoat/actuator/health`,
+    { method: "GET", redirect: "manual", signal: AbortSignal.timeout(10000) },
+  );
+  try {
+    return response.status === 200;
+  } finally {
+    await response.body?.cancel();
+  }
+}
+
 export async function runLabTest({ id, config, store, fetcher = fetch }) {
   const test = tests.find((item) => item.id === id);
   if (!test) throw Object.assign(new Error("Unknown test"), { status: 400 });
@@ -47,18 +61,15 @@ export async function runLabTest({ id, config, store, fetcher = fetch }) {
     const key = `runs/${startedAt}-${run.id}.json`;
     await store.put(key, run);
     try {
-      const response = await fetcher(
-        `https://${config.dojoHost}${test.path}`,
-        {
-          method: "GET",
-          redirect: "manual",
-          signal: AbortSignal.timeout(10000),
-          headers: {
-            "User-Agent": "CodeToCloud-AuthorizedTraining/1.0",
-            "X-Dojo-Run-Id": run.id,
-          },
+      const response = await fetcher(`https://${config.dojoHost}${test.path}`, {
+        method: "GET",
+        redirect: "manual",
+        signal: AbortSignal.timeout(10000),
+        headers: {
+          "User-Agent": "CodeToCloud-AuthorizedTraining/1.0",
+          "X-Dojo-Run-Id": run.id,
         },
-      );
+      });
       run.httpStatus = response.status;
       run.state =
         response.status >= 300 && response.status < 400

@@ -4,7 +4,7 @@ import { once } from "node:events";
 import { createApp } from "../apps/control-portal/app.mjs";
 import { MemoryEvidenceStore } from "../shared/evidence-store.mjs";
 import { emptyReport } from "../shared/report.mjs";
-import { runLabTest } from "../apps/control-portal/lab.mjs";
+import { runLabTest, readDojoHealth } from "../apps/control-portal/lab.mjs";
 
 const config = {
   origin: "http://127.0.0.1",
@@ -15,6 +15,56 @@ const config = {
   dojoResourceId: "/subscriptions/test/target",
   dojoDigest: `sha256:${"a".repeat(64)}`,
 };
+test("fixed private health probe refuses redirects and foreign targets", async () => {
+  let requests = 0;
+  const fetcher = async (url, options) => {
+    requests++;
+    assert.equal(url, `https://${config.dojoHost}/WebGoat/actuator/health`);
+    assert.equal(options.method, "GET");
+    assert.equal(options.redirect, "manual");
+    return {
+      status: requests === 1 ? 200 : 302,
+      body: { cancel: async () => {} },
+    };
+  };
+  assert.equal(await readDojoHealth(config, fetcher), true);
+  assert.equal(await readDojoHealth(config, fetcher), false);
+  await assert.rejects(
+    readDojoHealth({ ...config, dojoHost: "169.254.169.254" }, fetcher),
+    /Invalid fixed training target/,
+  );
+  assert.equal(requests, 2);
+});
+test("portal health checks the private Dojo without writing run evidence", async () => {
+  const store = new MemoryEvidenceStore();
+  let status = 200;
+  let requests = 0;
+  const app = createApp({
+    config,
+    store,
+    reportProvider: async () => emptyReport(config),
+    fetcher: async () => {
+      requests++;
+      return { status };
+    },
+  });
+  const server = app.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  try {
+    const url = `http://127.0.0.1:${server.address().port}/health/dojo`;
+    const healthy = await fetch(url);
+    assert.equal(healthy.status, 200);
+    assert.deepEqual(await healthy.json(), { status: "healthy" });
+    status = 302;
+    const redirected = await fetch(url);
+    assert.equal(redirected.status, 503);
+    assert.deepEqual(await redirected.json(), { status: "unavailable" });
+    assert.equal(requests, 2);
+    assert.deepEqual(await store.list("runs/"), []);
+  } finally {
+    server.close();
+  }
+});
 test("admin authorization, CSRF, logout revocation and fixed target boundary", async () => {
   const store = new MemoryEvidenceStore();
   let requests = 0;

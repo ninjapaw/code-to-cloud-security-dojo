@@ -44,25 +44,64 @@ export function configHash(config) {
   return createHash("sha256").update(JSON.stringify(config)).digest("hex");
 }
 
+export async function readHostedDojoHealth(config, fetcher = fetch) {
+  const response = await fetcher(
+    `https://${names(config).portal}.azurewebsites.net/health/dojo`,
+    { method: "GET", redirect: "manual", signal: AbortSignal.timeout(15000) },
+  );
+  if (response.status === 503) {
+    await response.body?.cancel();
+    return { state: "gap", detail: "Private Dojo did not return HTTP 200" };
+  }
+  if (
+    response.status !== 200 ||
+    !response.headers.get("content-type")?.includes("application/json")
+  ) {
+    await response.body?.cancel();
+    return {
+      state: "unknown",
+      detail: `Portal health response was HTTP ${response.status} or not JSON`,
+    };
+  }
+  try {
+    const result = await response.json();
+    return result?.status === "healthy"
+      ? {
+          state: "observed",
+          detail: "Portal reached private Dojo health over VNet (HTTP 200)",
+        }
+      : { state: "gap", detail: "Portal did not confirm private Dojo health" };
+  } catch {
+    return {
+      state: "unknown",
+      detail: "Portal health response was not valid JSON",
+    };
+  }
+}
+
 export async function verifiedPrivateSecrets(client, config, vaultName, runId) {
   const vaultPath = `${client.scope}/resourceGroups/${config.resourceGroup}/providers/Microsoft.KeyVault/vaults/${vaultName}`;
   for (const name of ["admin-password", "session-key"]) {
     let secret;
     try {
-      secret = await client.request(`${vaultPath}/secrets/${name}?api-version=2024-11-01`);
+      secret = await client.request(
+        `${vaultPath}/secrets/${name}?api-version=2024-11-01`,
+      );
     } catch (error) {
       if (error.status === 404) return false;
       throw error;
     }
     if (
-      secret.id?.toLowerCase() !== `${vaultPath}/secrets/${name}`.toLowerCase() ||
+      secret.id?.toLowerCase() !==
+        `${vaultPath}/secrets/${name}`.toLowerCase() ||
       secret.tags?.managedBy !== "code-to-cloud-security-dojo" ||
       secret.tags?.purpose !== name ||
       secret.tags?.bootstrapRunId !== runId ||
       secret.properties?.attributes?.enabled !== true ||
       !Number.isFinite(secret.properties?.attributes?.exp) ||
       secret.properties.attributes.exp <= Date.now() / 1000 + 3600
-    ) return false;
+    )
+      return false;
   }
   return true;
 }

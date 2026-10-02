@@ -11,7 +11,13 @@ import {
   assertOwned,
 } from "../shared/config.mjs";
 import { AzureClient } from "../shared/azure.mjs";
-import { az, run, configHash, requireConfirmation, verifiedPrivateSecrets } from "./lib/lifecycle.mjs";
+import {
+  az,
+  run,
+  configHash,
+  requireConfirmation,
+  verifiedPrivateSecrets,
+} from "./lib/lifecycle.mjs";
 import { createDeploymentStatus } from "./lib/deployment-status.mjs";
 
 const { positionals, values } = parseArgs({
@@ -27,18 +33,31 @@ const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const config = await loadConfig({ offline: values.audit });
 const resourceNames = names(config);
 if (values.audit) {
-  console.log(JSON.stringify({
-    action, audit: true,
-    scope: { subscriptionId: config.subscriptionId, resourceGroup: config.resourceGroup, location: config.location },
-    worker: `${resourceNames.portal}-bootstrap`,
-    note: "No image push, Azure request, Key Vault write or file output performed",
-  }, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        action,
+        audit: true,
+        scope: {
+          subscriptionId: config.subscriptionId,
+          resourceGroup: config.resourceGroup,
+          location: config.location,
+        },
+        worker: `${resourceNames.portal}-bootstrap`,
+        note: "No image push, Azure request, Key Vault write or file output performed",
+      },
+      null,
+      2,
+    ),
+  );
   process.exit(0);
 }
 if (action === "prepare") {
   requireConfirmation(config, "bootstrap-build", values.confirm);
   if (run("git", ["status", "--porcelain"]))
-    throw new Error("Commit reviewed bootstrap changes before building or pushing the worker image");
+    throw new Error(
+      "Commit reviewed bootstrap changes before building or pushing the worker image",
+    );
 }
 const output = fileURLToPath(
   new URL(`../output/${config.labId}/`, import.meta.url),
@@ -115,7 +134,15 @@ async function cleanup() {
     }
   }
   if (await resource(workerPath, "2024-11-01"))
-    az(config, ["webapp", "delete", "--resource-group", config.resourceGroup, "--name", workerName, "--keep-empty-plan"]);
+    az(config, [
+      "webapp",
+      "delete",
+      "--resource-group",
+      config.resourceGroup,
+      "--name",
+      workerName,
+      "--keep-empty-plan",
+    ]);
   if (identity) {
     for (let attempt = 0; attempt < 30; attempt++) {
       if (!(await resource(workerPath, "2024-11-01"))) break;
@@ -275,9 +302,11 @@ async function main() {
     changes.some(
       (item) =>
         item.changeType !== "Create" ||
-        (![workerPath.toLowerCase(), identityPath.toLowerCase(), `${groupPath}/providers/Microsoft.Web/serverFarms/${resourceNames.portal}-plan`.toLowerCase()].some((path) =>
-          item.resourceId.toLowerCase().startsWith(path),
-        ) &&
+        (![
+          workerPath.toLowerCase(),
+          identityPath.toLowerCase(),
+          `${groupPath}/providers/Microsoft.Web/serverFarms/${resourceNames.portal}-plan`.toLowerCase(),
+        ].some((path) => item.resourceId.toLowerCase().startsWith(path)) &&
           ![vaultPath.toLowerCase(), registryPath.toLowerCase()].some((path) =>
             item.resourceId
               .toLowerCase()
@@ -323,21 +352,39 @@ async function main() {
       ],
       { json: true },
     );
-    await status.update("Waiting for ARM readback of both private vault secrets");
+    await status.update(
+      "Waiting for ARM readback of both private vault secrets",
+    );
     let observed = false;
     for (let attempt = 0; attempt < 90; attempt++) {
-      if (await verifiedPrivateSecrets(client, config, resourceNames.vault, manifest.runId)) {
+      if (
+        await verifiedPrivateSecrets(
+          client,
+          config,
+          resourceNames.vault,
+          manifest.runId,
+        )
+      ) {
         observed = true;
         break;
       }
       await new Promise((resolve) => setTimeout(resolve, 5000));
     }
     if (!observed)
-      throw new Error("Private vault readback for both credentials was not observed");
+      throw new Error(
+        "Private vault readback for both credentials was not observed",
+      );
   } finally {
     if (attempted) await cleanup();
   }
-  if (!await verifiedPrivateSecrets(client, config, resourceNames.vault, manifest.runId))
+  if (
+    !(await verifiedPrivateSecrets(
+      client,
+      config,
+      resourceNames.vault,
+      manifest.runId,
+    ))
+  )
     throw new Error("Private vault metadata changed during worker cleanup");
   await writeFile(
     join(output, "private-bootstrap-proof.json"),

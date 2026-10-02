@@ -8,9 +8,14 @@ import {
   createDeploymentStatus,
   renderDeploymentStatus,
 } from "../scripts/lib/deployment-status.mjs";
-import { ensureBootstrapSecrets, stampBootstrapSecrets, startBootstrapHealth } from "../scripts/secret-bootstrap.mjs";
+import {
+  ensureBootstrapSecrets,
+  stampBootstrapSecrets,
+  startBootstrapHealth,
+} from "../scripts/secret-bootstrap.mjs";
 import {
   configHash,
+  readHostedDojoHealth,
   requireConfirmation,
   validateRelease,
   verifiedPrivateSecrets,
@@ -21,6 +26,41 @@ import { ownedReaderAssignments } from "../scripts/lib/lifecycle.mjs";
 const config = JSON.parse(
   await readFile(new URL("../config/deploy.config.json", import.meta.url)),
 );
+test("hosted private HTTP health requires exact portal JSON", async () => {
+  const url = `https://${names(config).portal}.azurewebsites.net/health/dojo`;
+  const fetcher = async (target, options) => {
+    assert.equal(target, url);
+    assert.equal(options.redirect, "manual");
+    return Response.json({ status: "healthy" });
+  };
+  assert.equal((await readHostedDojoHealth(config, fetcher)).state, "observed");
+  assert.equal(
+    (
+      await readHostedDojoHealth(
+        config,
+        async () => new Response(null, { status: 503 }),
+      )
+    ).state,
+    "gap",
+  );
+  assert.equal(
+    (
+      await readHostedDojoHealth(config, async () =>
+        Response.redirect(url, 302),
+      )
+    ).state,
+    "unknown",
+  );
+  assert.equal(
+    (
+      await readHostedDojoHealth(
+        config,
+        async () => new Response("<html>fallback</html>"),
+      )
+    ).state,
+    "unknown",
+  );
+});
 test("hostnames accept Azure-generated names but reject foreign sites and suffix attacks", () => {
   const name = "dojo-123456789abc-app";
   assert.equal(
@@ -129,11 +169,22 @@ test("private credential bootstrap is idempotent and refuses implicit rotation",
   assert.equal(values.get("admin-password").value, original);
 });
 test("private readback stamps both existing secrets without rotating values", async () => {
-  const values = new Map(["admin-password", "session-key"].map((name) => [name, {
-    value: `existing-${name}`, properties: { version: "existing-version", tags: { managedBy: "code-to-cloud-security-dojo", purpose: name } },
-  }]));
+  const values = new Map(
+    ["admin-password", "session-key"].map((name) => [
+      name,
+      {
+        value: `existing-${name}`,
+        properties: {
+          version: "existing-version",
+          tags: { managedBy: "code-to-cloud-security-dojo", purpose: name },
+        },
+      },
+    ]),
+  );
   const secrets = {
-    async getSecret(name) { return values.get(name); },
+    async getSecret(name) {
+      return values.get(name);
+    },
     async updateSecretProperties(name, version, options) {
       assert.equal(version, "existing-version");
       values.get(name).properties.tags = options.tags;
@@ -147,26 +198,56 @@ test("private readback stamps both existing secrets without rotating values", as
   }
 });
 test("ARM proof requires fresh enabled metadata for both exact secrets", async () => {
-  const vaultPath = "/subscriptions/test/resourceGroups/training/providers/Microsoft.KeyVault/vaults/training-vault";
-  const metadata = new Map(["admin-password", "session-key"].map((name) => [name, {
-    id: `${vaultPath}/secrets/${name}`,
-    tags: { managedBy: "code-to-cloud-security-dojo", purpose: name, bootstrapRunId: "run-123" },
-    properties: { attributes: { enabled: true, exp: Math.floor(Date.now() / 1000) + 86400 } },
-  }]));
+  const vaultPath =
+    "/subscriptions/test/resourceGroups/training/providers/Microsoft.KeyVault/vaults/training-vault";
+  const metadata = new Map(
+    ["admin-password", "session-key"].map((name) => [
+      name,
+      {
+        id: `${vaultPath}/secrets/${name}`,
+        tags: {
+          managedBy: "code-to-cloud-security-dojo",
+          purpose: name,
+          bootstrapRunId: "run-123",
+        },
+        properties: {
+          attributes: {
+            enabled: true,
+            exp: Math.floor(Date.now() / 1000) + 86400,
+          },
+        },
+      },
+    ]),
+  );
   const client = {
     scope: "/subscriptions/test",
-    async request(path) { return metadata.get(path.split("/secrets/")[1].split("?")[0]); },
+    async request(path) {
+      return metadata.get(path.split("/secrets/")[1].split("?")[0]);
+    },
   };
   const scope = { resourceGroup: "training" };
-  assert.equal(await verifiedPrivateSecrets(client, scope, "training-vault", "run-123"), true);
+  assert.equal(
+    await verifiedPrivateSecrets(client, scope, "training-vault", "run-123"),
+    true,
+  );
   metadata.get("session-key").tags.bootstrapRunId = "another-run";
-  assert.equal(await verifiedPrivateSecrets(client, scope, "training-vault", "run-123"), false);
+  assert.equal(
+    await verifiedPrivateSecrets(client, scope, "training-vault", "run-123"),
+    false,
+  );
   metadata.get("session-key").tags.bootstrapRunId = "run-123";
   metadata.get("session-key").properties.attributes.exp = 0;
-  assert.equal(await verifiedPrivateSecrets(client, scope, "training-vault", "run-123"), false);
-  metadata.get("session-key").properties.attributes.exp = Math.floor(Date.now() / 1000) + 86400;
+  assert.equal(
+    await verifiedPrivateSecrets(client, scope, "training-vault", "run-123"),
+    false,
+  );
+  metadata.get("session-key").properties.attributes.exp =
+    Math.floor(Date.now() / 1000) + 86400;
   metadata.get("session-key").id = `${vaultPath}/secrets/wrong`;
-  assert.equal(await verifiedPrivateSecrets(client, scope, "training-vault", "run-123"), false);
+  assert.equal(
+    await verifiedPrivateSecrets(client, scope, "training-vault", "run-123"),
+    false,
+  );
 });
 test("private bootstrap health listener answers App Service warmup", async () => {
   const server = startBootstrapHealth(0, "127.0.0.1");
@@ -184,16 +265,28 @@ test("temporary credential worker is private, VNet-integrated and vault-scoped",
     new URL("../infra/secret-bootstrap.bicep", import.meta.url),
     "utf8",
   );
-  const lifecycle = await readFile(new URL("../scripts/bootstrap-secrets.mjs", import.meta.url), "utf8");
+  const lifecycle = await readFile(
+    new URL("../scripts/bootstrap-secrets.mjs", import.meta.url),
+    "utf8",
+  );
   assert.match(worker, /publicNetworkAccess: 'Disabled'/);
-  assert.match(worker, /resource plan 'Microsoft\.Web\/serverfarms@2024-11-01' existing/);
-  assert.match(worker, /resource restoredPlan 'Microsoft\.Web\/serverfarms@2024-11-01' = if \(restorePlan\) \{[\s\S]*?name: '\$\{portalName\}-plan'[\s\S]*?sku: \{ name: appServiceSku, capacity: 1 \}/);
+  assert.match(
+    worker,
+    /resource plan 'Microsoft\.Web\/serverfarms@2024-11-01' existing/,
+  );
+  assert.match(
+    worker,
+    /resource restoredPlan 'Microsoft\.Web\/serverfarms@2024-11-01' = if \(restorePlan\) \{[\s\S]*?name: '\$\{portalName\}-plan'[\s\S]*?sku: \{ name: appServiceSku, capacity: 1 \}/,
+  );
   assert.match(worker, /dependsOn: \[pull, writeSecrets, restoredPlan\]/);
   assert.match(worker, /virtualNetworkSubnetId: subnet\.id/);
   assert.match(worker, /vnetRouteAllEnabled: true/);
   assert.match(worker, /alwaysOn: true/);
   assert.match(worker, /name: 'WEBSITES_PORT', value: '8080'/);
-  assert.match(worker, /applicationLogs: \{ fileSystem: \{ level: 'Information' \} \}/);
+  assert.match(
+    worker,
+    /applicationLogs: \{ fileSystem: \{ level: 'Information' \} \}/,
+  );
   assert.match(worker, /logAnalyticsDestinationType: 'Dedicated'/);
   assert.match(
     worker,
@@ -205,7 +298,7 @@ test("temporary credential worker is private, VNet-integrated and vault-scoped",
   );
   assert.match(worker, /scmIpSecurityRestrictionsDefaultAction: 'Deny'/);
   assert.doesNotMatch(worker, /(?:adminIpv4Address|clientSecret|password):/);
-  assert.match(lifecycle, /"webapp", "delete"[\s\S]*?"--keep-empty-plan"/);
+  assert.match(lifecycle, /"webapp",\s*"delete"[\s\S]*?"--keep-empty-plan"/);
 });
 test("private App Service workloads route through an Internet-denied subnet", async () => {
   const foundation = await readFile(

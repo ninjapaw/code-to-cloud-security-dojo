@@ -400,7 +400,13 @@ detection. Subscription Security Reader is read-only but broad; review its bound
 The Dojo workload is private and is not reverse-proxied into the portal. Interactive
 WebGoat lessons need a separately approved private network route and DNS access to
 the VNet, such as an existing training VPN. A portal link is not a network tunnel.
-The fixed test runner uses private connectivity. WebWolf on port 9090 is not exposed;
+The fixed test runner uses private connectivity. From the authorized `/32`,
+`GET /health/dojo` on the portal checks only the fixed private Dojo health path
+over its VNet integration: HTTP 200 means the Dojo responded; 503 or a redirect
+does not. No credentials, attack request or Blob evidence are involved. The
+`verify` report records this HTTP result separately from the portal's own
+`/health` and from private Blob run evidence, which may remain unavailable to
+a workstation outside the VNet. WebWolf on port 9090 is not exposed;
 use upstream localhost instructions for dependent lessons. Never weaken isolation
 to make an exercise or attack-path finding appear.
 

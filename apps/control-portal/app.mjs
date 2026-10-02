@@ -4,7 +4,7 @@ import { rateLimit } from "express-rate-limit";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { Sessions, equalSecret } from "./auth.mjs";
-import { runLabTest, tests } from "./lab.mjs";
+import { runLabTest, readDojoHealth, tests } from "./lab.mjs";
 import { story, reportHtml } from "../../shared/report.mjs";
 
 export function createApp({
@@ -59,6 +59,17 @@ export function createApp({
       securityEfficacy: "not-attested",
     }),
   );
+  app.get("/health/dojo", async (_request, response) => {
+    if (preview) return response.status(503).json({ status: "unavailable" });
+    try {
+      const healthy = await readDojoHealth(config, fetcher);
+      return response.status(healthy ? 200 : 503).json({
+        status: healthy ? "healthy" : "unavailable",
+      });
+    } catch {
+      return response.status(503).json({ status: "unavailable" });
+    }
+  });
   app.use(
     "/api",
     rateLimit({

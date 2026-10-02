@@ -109,7 +109,12 @@ test("ARM empty DELETE responses do not require JSON bodies", async () => {
       fetcher: async () => new Response(null, { status: 200 }),
     },
   );
-  assert.equal(await client.request("/subscriptions/test/resources/example", { method: "DELETE" }), null);
+  assert.equal(
+    await client.request("/subscriptions/test/resources/example", {
+      method: "DELETE",
+    }),
+    null,
+  );
 });
 test("collector preserves unknown read failures and reports observed image digests", async () => {
   const config = {

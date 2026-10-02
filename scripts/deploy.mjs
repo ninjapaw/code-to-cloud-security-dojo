@@ -38,6 +38,7 @@ import {
   releaseParameters,
   requireReleaseCostApproval,
   verifiedPrivateSecrets,
+  readHostedDojoHealth,
 } from "./lib/lifecycle.mjs";
 
 const { values, positionals } = parseArgs({
@@ -679,6 +680,18 @@ async function main() {
         });
       }
     }
+    try {
+      report.checks.push({
+        id: "Dojo private HTTP",
+        ...(await readHostedDojoHealth(config)),
+      });
+    } catch {
+      report.checks.push({
+        id: "Dojo private HTTP",
+        state: "unknown",
+        detail: "Portal-originated private health check unavailable",
+      });
+    }
     await mkdir(output, { recursive: true });
     const stamp = Date.now();
     await writeFile(
@@ -835,8 +848,17 @@ async function verifyPrivateCredentials(client, config, output, resourceNames) {
       if (error.status !== 404) throw error;
     }
   }
-  if (!await verifiedPrivateSecrets(client, config, resourceNames.vault, proof.runId))
-    throw new Error("Private vault credential proof no longer matches both secret versions");
+  if (
+    !(await verifiedPrivateSecrets(
+      client,
+      config,
+      resourceNames.vault,
+      proof.runId,
+    ))
+  )
+    throw new Error(
+      "Private vault credential proof no longer matches both secret versions",
+    );
   console.log("Private vault credentials verified by temporary VNet worker");
 }
 
