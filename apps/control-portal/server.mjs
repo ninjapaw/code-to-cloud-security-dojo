@@ -42,6 +42,7 @@ Object.assign(config, {
   origin: process.env.WEBSITE_HOSTNAME
     ? `https://${process.env.WEBSITE_HOSTNAME}`
     : process.env.DOJO_ORIGIN,
+  adminUsername: process.env.DOJO_ADMIN_USERNAME,
   adminPassword: process.env.DOJO_ADMIN_PASSWORD,
   sessionKey: process.env.DOJO_SESSION_KEY,
   dojoHost: process.env.DOJO_TARGET_HOST,

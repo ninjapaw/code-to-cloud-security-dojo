@@ -2,9 +2,10 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { resolve, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash } from "node:crypto";
 import { AzureCliCredential } from "@azure/identity";
 import { SecretClient } from "@azure/keyvault-secrets";
+import { ensureManagedSecrets } from "../shared/credentials.mjs";
 import {
   loadConfig,
   root,
@@ -355,7 +356,7 @@ async function main() {
     );
     await deployTemplate("foundation", parameters);
     await updateStatus(
-      "Creating or verifying admin and session secrets in Key Vault",
+      "Creating or verifying admin username, password and session key in Key Vault",
     );
     await ensureSecrets(client, resourceNames.vault, false);
     console.log(
@@ -797,33 +798,9 @@ async function ensureSecrets(client, vaultName, rotate) {
     `https://${vaultName}.vault.azure.net`,
     new AzureCliCredential({ tenantId: client.config.tenantId }),
   );
-  for (const name of ["admin-password", "session-key"]) {
-    if (!rotate) {
-      try {
-        const current = await secrets.getSecret(name);
-        if (
-          !current.properties.enabled ||
-          !current.value ||
-          current.value.length < 43 ||
-          (current.properties.expiresOn &&
-            current.properties.expiresOn < new Date())
-        )
-          throw new Error(
-            `Secret ${name} is disabled or expired; rotate explicitly`,
-          );
-        continue;
-      } catch (error) {
-        if (error.statusCode !== 404) throw error;
-      }
-    }
-    await secrets.setSecret(name, randomBytes(48).toString("base64url"), {
-      expiresOn: new Date(Date.now() + 90 * 86400000),
-      contentType: "text/plain",
-      tags: { managedBy: "code-to-cloud-security-dojo", purpose: name },
-    });
-  }
+  await ensureManagedSecrets(secrets, { rotate });
   console.log(
-    "Credentials are managed in Key Vault. Retrieve admin-password through an authorized Key Vault session; no secret was printed or saved locally. Rotate within 90 days.",
+    "Credentials are managed in Key Vault. Retrieve admin-username and admin-password through an authorized Key Vault session; no values were printed or saved locally. Rotate within 90 days.",
   );
 }
 
@@ -874,7 +851,7 @@ async function verifyPrivateCredentials(client, config, output, resourceNames) {
     ))
   )
     throw new Error(
-      "Private vault credential proof no longer matches both secret versions",
+      "Private vault credential proof no longer matches all required secret versions",
     );
   console.log("Private vault credentials verified by temporary VNet worker");
 }

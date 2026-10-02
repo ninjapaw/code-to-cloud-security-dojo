@@ -353,7 +353,7 @@ async function main() {
       { json: true },
     );
     await status.update(
-      "Waiting for ARM readback of both private vault secrets",
+      "Waiting for ARM readback of all required private vault secrets",
     );
     let observed = false;
     for (let attempt = 0; attempt < 90; attempt++) {
@@ -372,7 +372,7 @@ async function main() {
     }
     if (!observed)
       throw new Error(
-        "Private vault readback for both credentials was not observed",
+        "Private vault readback for all required credentials was not observed",
       );
   } finally {
     if (attempted) await cleanup();

@@ -112,6 +112,7 @@ module portal 'modules/app.bicep' = {
       { name: 'DOJO_NGINX_PROXY_ENABLED', value: nginxProxyEnabled ? 'true' : 'false' }
       { name: 'DOJO_NGINX_PROXY_MODE', value: nginxProxyMode }
       { name: 'DOJO_NGINX_PROXY_DIGEST', value: nginxProxyDigest }
+      { name: 'DOJO_ADMIN_USERNAME', value: '@Microsoft.KeyVault(SecretUri=${vault.properties.vaultUri}secrets/admin-username)' }
       { name: 'DOJO_ADMIN_PASSWORD', value: '@Microsoft.KeyVault(SecretUri=${vault.properties.vaultUri}secrets/admin-password)' }
       { name: 'DOJO_SESSION_KEY', value: '@Microsoft.KeyVault(SecretUri=${vault.properties.vaultUri}secrets/session-key)' }
     ]

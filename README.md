@@ -73,8 +73,8 @@ The `dojo` workload uses a pinned WebGoat source snapshot. The Node/Express
   for portal-to-workload traffic. WebWolf is not exposed; SCM/FTP publishing stays blocked.
 - Portal VNet integration and a single authorized public IPv4 `/32` restriction.
 - Key Vault with RBAC, purge protection, private endpoint and authenticated public access by default.
-- Random admin password and session signing key generated directly into Key Vault
-  through the SDK. No secret arguments, committed credentials or local secret files.
+- Admin username plus random admin password and session signing key stored directly
+  in Key Vault through the SDK. No secret arguments, committed credentials or local secret files.
 - Versionless Key Vault references for the portal; managed identity for Azure/Blob
   access. WebGoat receives neither portal credentials nor evidence permissions.
 - Private-endpoint Blob evidence store with shared-key and public blob access off;
@@ -294,8 +294,9 @@ node scripts/deploy.mjs provision --confirm "provision:<subscription-id>:<resour
 
 The OIDC bootstrap registers providers, creates the ownership-tagged group and
 grants the portal subscription Security Reader role. Provision verifies that
-state, previews and deploys the foundation, then creates missing admin/session
-secrets directly in Key Vault. Existing valid secrets are preserved. An existing
+state, previews and deploys the foundation, then creates the missing admin username,
+password and session key directly in Key Vault. Existing valid values are preserved;
+adding the username does not rotate the password or signing key. An existing
 untagged group is not adopted. RBAC propagation can delay secret creation.
 If configuration or policy disables public vault access, the SDK secret step requires an approved
 VNet-connected execution path to the private endpoint; a successful ARM deployment
@@ -314,9 +315,9 @@ node scripts/bootstrap-secrets.mjs apply --confirm "bootstrap:<preview-hash>:<su
 ```
 
 `prepare` builds and scans a pinned worker image, pushes it by digest, and prints
-the state-bound token from ARM what-if. `apply` repeats what-if, verifies both
-secrets inside the VNet, then stamps their existing versions with a non-secret
-run ID. ARM rereads both tags, enabled state and expiry without returning secret
+the state-bound token from ARM what-if. `apply` repeats what-if, verifies all three
+required values inside the VNet, then stamps their existing versions with a non-secret
+run ID. ARM rereads their tags, enabled state and expiry without returning secret
 values. It removes the temporary site, identity and grants on completion or
 failure, preserving the portal plan. A fresh ARM readback and cleanup are required
 before `deploy` accepts the ignored, short-lived bootstrap proof. Log Analytics
@@ -432,13 +433,36 @@ sent to the sleeping container.
 
 ### Sign In and Walk Through the Story
 
-Open the printed portal URL from the configured admin IP. Retrieve `admin-password`
-directly through an authorized Key Vault session, then sign in as `admin`. Never
+Open the printed portal URL from the configured admin IP. Retrieve `admin-username`
+and `admin-password` directly through an authorized Key Vault session, then use
+that pair to sign in. The initial username is `admin`; a valid existing username
+is preserved. Never
 send credentials through chat, command-line arguments, reports or browser JavaScript.
 Sessions last one hour; logout revokes the stored session.
 
-In the Azure portal, open the lab's Key Vault, then **Secrets > admin-password >
-current version > Show Secret Value**. By default the vault accepts public
+In the Azure portal, open the lab's Key Vault, then **Secrets > admin-username >
+current version > Show Secret Value**; repeat for `admin-password`.
+
+| Purpose | Key Vault entry |
+| --- | --- |
+| Portal login username | `admin-username` |
+| Portal login password | `admin-password` |
+| Portal session signing, not a login credential | `session-key` |
+
+The portal reads its username through the same versionless Key Vault reference
+mechanism as the password and signing key; it has no hard-coded login fallback.
+Usernames must start with a letter or digit, contain only letters, digits,
+`.`, `_`, `@`, `+` or `-`, and be at most 128 characters. After deliberately
+changing the username in Key Vault, use the credential rotation workflow below to
+refresh references and restart the portal; retrieve the new password afterward.
+Rotation preserves the username while renewing its expiration and regenerating
+the password and signing key.
+
+Azure registry, storage and service access uses managed identities, not shared
+username/password pairs. Individual WebGoat lesson accounts remain separate and
+are not copied into this vault.
+
+By default the vault accepts public
 connections from all networks. An admin-IP-only profile requires the configured
 IP, and a private-only profile requires approved private connectivity. Reading a
 secret always requires an authenticated Entra identity with Key Vault data-plane
@@ -531,8 +555,9 @@ node scripts/deploy.mjs verify
 node scripts/deploy.mjs report
 ```
 
-Rotation creates new Key Vault versions, requests reference refresh and restarts
-the portal. Verify the new credential and rejection of old sessions before sharing
+Rotation creates new Key Vault versions, retaining the username and renewing its
+expiration, requests reference refresh and restarts the portal. Verify the new
+password and rejection of old sessions before sharing
 access. This is an explicit operator workflow, not unattended rotation, and its
 live behavior remains unverified.
 

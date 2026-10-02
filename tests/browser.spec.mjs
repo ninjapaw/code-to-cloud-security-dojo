@@ -70,6 +70,7 @@ test("deployment status stays readable on desktop and mobile", async () => {
 test("authenticated browser consent, fixed test execution, report and logout", async () => {
   const config = {
     origin: "http://127.0.0.1",
+    adminUsername: "workshop-admin",
     adminPassword: "local-test-only-".repeat(5),
     sessionKey: "local-session-only-".repeat(5),
     labId: "test-fixture",
@@ -158,6 +159,7 @@ test("authenticated browser consent, fixed test execution, report and logout", a
     });
     await page.goto(config.origin);
     await page.locator("#login:not([hidden])").waitFor();
+    await page.locator('input[name="username"]').fill(config.adminUsername);
     await page.locator('input[name="password"]').fill(config.adminPassword);
     await page.locator("#login-form button").click();
     await page.locator("#workspace:not([hidden])").waitFor();

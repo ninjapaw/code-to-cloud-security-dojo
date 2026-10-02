@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import spawn from "cross-spawn";
 import { fileURLToPath } from "node:url";
 import { root, names, confirmation, accessSettings } from "../../shared/config.mjs";
+import { credentialSecretNames } from "../../shared/credentials.mjs";
 import { drowsyDragon } from "../../shared/drowsy-dragon.mjs";
 import { nginxProxy, nginxMode } from "../../shared/nginx-proxy.mjs";
 
@@ -110,7 +111,7 @@ export function readHostedEvidenceHealth(config, fetcher = fetch) {
 
 export async function verifiedPrivateSecrets(client, config, vaultName, runId) {
   const vaultPath = `${client.scope}/resourceGroups/${config.resourceGroup}/providers/Microsoft.KeyVault/vaults/${vaultName}`;
-  for (const name of ["admin-password", "session-key"]) {
+  for (const name of credentialSecretNames) {
     let secret;
     try {
       secret = await client.request(

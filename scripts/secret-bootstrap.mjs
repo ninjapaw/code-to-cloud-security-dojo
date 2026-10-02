@@ -1,34 +1,18 @@
-import { randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import { pathToFileURL } from "node:url";
 import { SecretClient } from "@azure/keyvault-secrets";
 import { ManagedIdentityCredential } from "@azure/identity";
+import {
+  credentialSecretNames,
+  ensureManagedSecrets,
+} from "../shared/credentials.mjs";
 
 export async function ensureBootstrapSecrets(secrets) {
-  for (const name of ["admin-password", "session-key"]) {
-    try {
-      const current = await secrets.getSecret(name);
-      if (
-        !current.properties.enabled ||
-        !current.value ||
-        current.value.length < 43 ||
-        (current.properties.expiresOn &&
-          current.properties.expiresOn < new Date())
-      )
-        throw new Error("Existing credential requires explicit rotation");
-    } catch (error) {
-      if (error.statusCode !== 404) throw error;
-      await secrets.setSecret(name, randomBytes(48).toString("base64url"), {
-        expiresOn: new Date(Date.now() + 90 * 86400000),
-        contentType: "text/plain",
-        tags: { managedBy: "code-to-cloud-security-dojo", purpose: name },
-      });
-    }
-  }
+  await ensureManagedSecrets(secrets);
 }
 
 export async function stampBootstrapSecrets(secrets, runId) {
-  for (const name of ["admin-password", "session-key"]) {
+  for (const name of credentialSecretNames) {
     const current = await secrets.getSecret(name);
     await secrets.updateSecretProperties(name, current.properties.version, {
       tags: { ...current.properties.tags, bootstrapRunId: runId },

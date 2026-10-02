@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { Sessions, equalSecret } from "./auth.mjs";
 import { runLabTest, readDojoHealth, tests } from "./lab.mjs";
 import { story, reportHtml } from "../../shared/report.mjs";
+import { validCredentialValue } from "../../shared/credentials.mjs";
 
 export function createApp({
   config,
@@ -16,12 +17,9 @@ export function createApp({
 }) {
   if (
     !preview &&
-    (config.adminPassword?.length < 43 ||
-      config.sessionKey?.length < 43 ||
-      !config.adminPassword ||
-      !config.sessionKey ||
-      config.adminPassword.startsWith("@Microsoft.KeyVault") ||
-      config.sessionKey.startsWith("@Microsoft.KeyVault"))
+    (!validCredentialValue("admin-username", config.adminUsername) ||
+      !validCredentialValue("admin-password", config.adminPassword) ||
+      !validCredentialValue("session-key", config.sessionKey))
   )
     throw new Error("Resolved Key Vault credentials are required");
   const app = express();
@@ -133,7 +131,8 @@ export function createApp({
     }),
     async (request, response) => {
       const valid =
-        request.body?.username === "admin" &&
+        typeof request.body?.username === "string" &&
+        equalSecret(request.body.username, config.adminUsername) &&
         typeof request.body?.password === "string" &&
         equalSecret(request.body.password, config.adminPassword);
       await store.put(
@@ -153,12 +152,12 @@ export function createApp({
         path: "/",
         maxAge: 3600000,
       });
-      response.json({ user: "admin", csrf: session.csrf });
+      response.json({ user: config.adminUsername, csrf: session.csrf });
     },
   );
   app.get("/api/session", (request, response) =>
     response.json({
-      user: request.session ? "admin" : null,
+      user: request.session ? config.adminUsername : null,
       csrf: request.session?.csrf,
       preview,
     }),

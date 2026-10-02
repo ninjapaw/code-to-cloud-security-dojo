@@ -26,6 +26,10 @@ import {
 import { confirmation } from "../shared/config.mjs";
 import { isLabHostname, names } from "../shared/config.mjs";
 import { ownedReaderAssignments } from "../scripts/lib/lifecycle.mjs";
+import {
+  credentialSecretNames,
+  ensureManagedSecrets,
+} from "../shared/credentials.mjs";
 const config = JSON.parse(
   await readFile(new URL("../config/deploy.config.json", import.meta.url)),
 );
@@ -209,7 +213,8 @@ test("private credential bootstrap is idempotent and refuses implicit rotation",
       return values.get(name);
     },
     async setSecret(name, value, options) {
-      assert.equal(value.length >= 43, true);
+      if (name === "admin-username") assert.equal(value, "admin");
+      else assert.equal(value.length >= 43, true);
       assert.equal(options.tags.purpose, name);
       values.set(name, {
         value,
@@ -218,7 +223,7 @@ test("private credential bootstrap is idempotent and refuses implicit rotation",
     },
   };
   await ensureBootstrapSecrets(secrets);
-  assert.deepEqual([...values.keys()], ["admin-password", "session-key"]);
+  assert.deepEqual([...values.keys()], credentialSecretNames);
   const original = values.get("admin-password").value;
   await ensureBootstrapSecrets(secrets);
   assert.equal(values.get("admin-password").value, original);
@@ -226,9 +231,105 @@ test("private credential bootstrap is idempotent and refuses implicit rotation",
   await assert.rejects(ensureBootstrapSecrets(secrets), /explicit rotation/);
   assert.equal(values.get("admin-password").value, original);
 });
-test("private readback stamps both existing secrets without rotating values", async () => {
-  const values = new Map(
+test("adding the username preserves existing passwords and signing keys", async () => {
+  const existing = new Map(
     ["admin-password", "session-key"].map((name) => [
+      name,
+      {
+        value: `${name}-`.repeat(5),
+        properties: {
+          enabled: true,
+          expiresOn: new Date(Date.now() + 86400000),
+        },
+      },
+    ]),
+  );
+  const writes = [];
+  const secrets = {
+    async getSecret(name) {
+      if (!existing.has(name))
+        throw Object.assign(new Error("Missing"), { statusCode: 404 });
+      return existing.get(name);
+    },
+    async setSecret(name, value, options) {
+      writes.push(name);
+      existing.set(name, {
+        value,
+        properties: { ...options, enabled: true },
+      });
+    },
+  };
+  await ensureManagedSecrets(secrets);
+  await ensureManagedSecrets(secrets);
+  assert.deepEqual(writes, ["admin-username"]);
+  assert.equal(existing.get("admin-username").value, "admin");
+  assert.equal(existing.get("admin-password").value, "admin-password-".repeat(5));
+  assert.equal(existing.get("session-key").value, "session-key-".repeat(5));
+});
+test("explicit rotation preserves a custom username and renews its expiry", async () => {
+  const values = new Map(
+    credentialSecretNames.map((name) => [
+      name,
+      {
+        value: name === "admin-username" ? "lab.owner@example.test" : name.repeat(6),
+        properties: {
+          enabled: true,
+          expiresOn: new Date(Date.now() + 86400000),
+        },
+      },
+    ]),
+  );
+  const password = values.get("admin-password").value;
+  const signingKey = values.get("session-key").value;
+  const writes = [];
+  const secrets = {
+    async getSecret(name) {
+      return values.get(name);
+    },
+    async setSecret(name, value, options) {
+      writes.push(name);
+      values.set(name, { value, properties: { ...options, enabled: true } });
+    },
+  };
+  await ensureManagedSecrets(secrets);
+  assert.deepEqual(writes, []);
+  await ensureManagedSecrets(secrets, { rotate: true });
+  assert.deepEqual(writes, credentialSecretNames);
+  assert.equal(values.get("admin-username").value, "lab.owner@example.test");
+  assert.notEqual(values.get("admin-password").value, password);
+  assert.notEqual(values.get("session-key").value, signingKey);
+  assert.ok(
+    values.get("admin-username").properties.expiresOn.getTime() >
+      Date.now() + 89 * 86400000,
+  );
+});
+test("credential permission errors and invalid usernames cannot trigger replacement", async () => {
+  let writes = 0;
+  const denied = {
+    async getSecret() {
+      throw Object.assign(new Error("Denied"), { statusCode: 403 });
+    },
+    async setSecret() {
+      writes++;
+    },
+  };
+  await assert.rejects(ensureManagedSecrets(denied), /Denied/);
+  const invalid = {
+    ...denied,
+    async getSecret() {
+      return { value: " ", properties: { enabled: true } };
+    },
+  };
+  await assert.rejects(ensureManagedSecrets(invalid), /explicit rotation/);
+  await assert.rejects(
+    ensureManagedSecrets(invalid, { rotate: true }),
+    /Correct admin-username explicitly/,
+  );
+  assert.equal(writes, 0);
+});
+test("private readback stamps all existing secrets without rotating values", async () => {
+  const values = new Map(
+    credentialSecretNames.map((name) => [
       name,
       {
         value: `existing-${name}`,
@@ -255,11 +356,11 @@ test("private readback stamps both existing secrets without rotating values", as
     assert.equal(secret.properties.tags.purpose, name);
   }
 });
-test("ARM proof requires fresh enabled metadata for both exact secrets", async () => {
+test("ARM proof requires fresh enabled metadata for every required secret", async () => {
   const vaultPath =
     "/subscriptions/test/resourceGroups/training/providers/Microsoft.KeyVault/vaults/training-vault";
   const metadata = new Map(
-    ["admin-password", "session-key"].map((name) => [
+    credentialSecretNames.map((name) => [
       name,
       {
         id: `${vaultPath}/secrets/${name}`,
@@ -280,7 +381,10 @@ test("ARM proof requires fresh enabled metadata for both exact secrets", async (
   const client = {
     scope: "/subscriptions/test",
     async request(path) {
-      return metadata.get(path.split("/secrets/")[1].split("?")[0]);
+      const name = path.split("/secrets/")[1].split("?")[0];
+      if (!metadata.has(name))
+        throw Object.assign(new Error("Missing"), { status: 404 });
+      return metadata.get(name);
     },
   };
   const scope = { resourceGroup: "training" };
@@ -288,6 +392,19 @@ test("ARM proof requires fresh enabled metadata for both exact secrets", async (
     await verifiedPrivateSecrets(client, scope, "training-vault", "run-123"),
     true,
   );
+  const username = metadata.get("admin-username");
+  metadata.delete("admin-username");
+  assert.equal(
+    await verifiedPrivateSecrets(client, scope, "training-vault", "run-123"),
+    false,
+  );
+  metadata.set("admin-username", username);
+  username.tags.bootstrapRunId = "another-run";
+  assert.equal(
+    await verifiedPrivateSecrets(client, scope, "training-vault", "run-123"),
+    false,
+  );
+  username.tags.bootstrapRunId = "run-123";
   metadata.get("session-key").tags.bootstrapRunId = "another-run";
   assert.equal(
     await verifiedPrivateSecrets(client, scope, "training-vault", "run-123"),
@@ -482,6 +599,11 @@ test("configurable WebGoat ingress preserves portal, optional workload and publi
   );
   assert.match(portal, /publicAccess: true/);
   assert.match(portal, /restrictToAdminIp: true/);
+  assert.match(
+    portal,
+    /name: 'DOJO_ADMIN_USERNAME', value: '@Microsoft\.KeyVault\(SecretUri=\$\{vault\.properties\.vaultUri\}secrets\/admin-username\)'/,
+  );
+  assert.doesNotMatch(dojo, /DOJO_ADMIN_|DOJO_SESSION_KEY/);
   assert.match(nginxProxy, /publicAccess: false/);
   assert.match(app, /param restrictToAdminIp bool = true/);
   assert.match(

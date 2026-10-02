@@ -8,6 +8,7 @@ import { runLabTest, readDojoHealth } from "../apps/control-portal/lab.mjs";
 
 const config = {
   origin: "http://127.0.0.1",
+  adminUsername: "workshop-admin",
   adminPassword: "a".repeat(64),
   sessionKey: "b".repeat(64),
   dojoHost: "dojo-123456789abc-app.azurewebsites.net",
@@ -140,7 +141,7 @@ test("admin authorization, CSRF, logout revocation and fixed target boundary", a
       ).status,
       403,
     );
-    const login = await fetch(`${origin}/api/login`, {
+    const wrongUsername = await fetch(`${origin}/api/login`, {
       method: "POST",
       headers,
       body: JSON.stringify({
@@ -148,9 +149,23 @@ test("admin authorization, CSRF, logout revocation and fixed target boundary", a
         password: config.adminPassword,
       }),
     });
+    assert.equal(wrongUsername.status, 401);
+    const login = await fetch(`${origin}/api/login`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        username: config.adminUsername,
+        password: config.adminPassword,
+      }),
+    });
     assert.equal(login.status, 200);
     const cookie = login.headers.get("set-cookie").split(";")[0];
     const session = await login.json();
+    assert.equal(session.user, config.adminUsername);
+    const readback = await fetch(`${origin}/api/session`, {
+      headers: { cookie },
+    });
+    assert.equal((await readback.json()).user, config.adminUsername);
     assert.match(login.headers.get("set-cookie"), /HttpOnly/);
     assert.equal(
       (
@@ -230,6 +245,18 @@ test("redirects are never followed and audit must precede network access", async
   assert.equal(requests, 1);
 });
 test("unresolved Key Vault references fail closed", () => {
+  for (const adminUsername of [
+    undefined,
+    "",
+    " ",
+    "a".repeat(129),
+    "@Microsoft.KeyVault(SecretUri=https://example/secrets/username)",
+  ]) {
+    assert.throws(
+      () => createApp({ config: { ...config, adminUsername } }),
+      /credentials/,
+    );
+  }
   assert.throws(
     () =>
       createApp({

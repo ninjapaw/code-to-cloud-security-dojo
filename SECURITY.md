@@ -50,6 +50,9 @@ There is no promised response SLA or supported production release.
 
 - Generate application credentials through the Key Vault workflow. Never use
   upstream sample passwords or key material for real access.
+- Keep the portal's `admin-username` and `admin-password` together in Key Vault.
+  The session signing key is separate; managed identities and individual WebGoat
+  lesson accounts do not receive fabricated shared username/password entries.
 - Keep local configuration, environment files, Azure/SSH state, credential files,
   scan exports, release receipts and reports out of Git and container build contexts.
 - Review staged files as well as ignore rules. Run `npm run check:public`, a dedicated
