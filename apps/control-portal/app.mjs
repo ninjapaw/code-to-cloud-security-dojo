@@ -73,7 +73,7 @@ export function createApp({
   app.get("/health/evidence", async (_request, response) => {
     if (preview) return response.status(503).json({ status: "unavailable" });
     try {
-      await store.list("runs/", 1);
+      await store.probe();
       return response.json({ status: "accessible" });
     } catch {
       return response.status(503).json({ status: "unavailable" });

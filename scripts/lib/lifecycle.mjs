@@ -102,8 +102,8 @@ export function readHostedEvidenceHealth(config, fetcher = fetch) {
     config,
     "evidence",
     "accessible",
-    "Portal can read private Blob evidence over VNet",
-    "Portal could not read private Blob evidence",
+    "Portal reached private Blob evidence container metadata over VNet",
+    "Portal could not reach private Blob evidence container metadata",
     fetcher,
   );
 }

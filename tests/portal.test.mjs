@@ -65,9 +65,12 @@ test("portal health checks the private Dojo without writing run evidence", async
     server.close();
   }
 });
-test("private evidence health discloses no runs and fails closed", async () => {
+test("private evidence health probes storage without listing runs and fails closed", async () => {
   const store = new MemoryEvidenceStore();
   await store.put("runs/private.json", { secret: "not-exposed" });
+  store.list = async () => {
+    throw new Error("Run records must not be listed by the health probe");
+  };
   const app = createApp({
     config,
     store,
@@ -80,7 +83,7 @@ test("private evidence health discloses no runs and fails closed", async () => {
     const healthy = await fetch(url);
     assert.equal(healthy.status, 200);
     assert.deepEqual(await healthy.json(), { status: "accessible" });
-    store.list = async () => {
+    store.probe = async () => {
       throw new Error("private failure with sensitive detail");
     };
     const unavailable = await fetch(url);

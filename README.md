@@ -407,9 +407,9 @@ does not. No credentials, attack request or Blob evidence are involved. The
 `verify` report records this HTTP result separately from the portal's own
 `/health` and from private Blob run evidence, which may remain unavailable to
 a workstation outside the VNet. `GET /health/evidence` on the same restricted
-portal returns only whether its managed identity can reach the private evidence
-container; it exposes no run records. The verifier reports that connectivity
-separately and still requires an authenticated portal session for full run
+portal returns only whether its managed identity can read private evidence-container
+metadata; it does not list or expose run records. The verifier reports that
+connectivity separately and still requires an authenticated portal session for full run
 evidence. WebWolf on port 9090 is not exposed;
 use upstream localhost instructions for dependent lessons. Never weaken isolation
 to make an exercise or attack-path finding appear.

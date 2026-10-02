@@ -10,6 +10,11 @@ export class BlobEvidenceStore {
       { retryOptions: { maxTries: 1, tryTimeoutInMs: 10000 } },
     ).getContainerClient("evidence");
   }
+  async probe() {
+    await this.container.getProperties({
+      abortSignal: AbortSignal.timeout(10000),
+    });
+  }
   async get(name) {
     try {
       return JSON.parse(
@@ -104,6 +109,7 @@ export class MemoryEvidenceStore {
       .slice(0, limit)
       .map(([, value]) => structuredClone(value));
   }
+  async probe() {}
   async withLock(callback) {
     if (this.busy || Date.now() - this.lastRun < 60000)
       throw Object.assign(new Error("Test busy or cooling down"), {
