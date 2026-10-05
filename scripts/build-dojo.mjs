@@ -15,7 +15,7 @@ try {
   const prepared = await prepareDojoImage(home, config.source, output);
   if (values["prepare-only"]) console.log(JSON.stringify(prepared, null, 2));
   else {
-    run("docker", ["build", "--platform", "linux/amd64", "--label", `org.opencontainers.image.source=${config.source.repository.replace(/\.git$/, "")}`, "--label", `org.opencontainers.image.revision=${prepared.manifest.revision}`, "--label", `dojo.source.sha256=${prepared.manifest.sha256}`, "-f", prepared.dockerfile, "-t", values.tag, prepared.sourcePath], { inherit: true });
+    run("docker", ["build", "--platform", "linux/amd64", "--label", `org.opencontainers.image.source=${config.source.repository.replace(/\.git$/, "")}`, "--label", `org.opencontainers.image.revision=${prepared.manifest.revision}`, "--label", `dojo.source.sha256=${prepared.manifest.sha256}`, "-f", prepared.dockerfile, "-t", values.tag, prepared.contextPath], { inherit: true });
     await verifySource(home, config.source);
     const imageId = run("docker", ["image", "inspect", values.tag, "--format", "{{.Id}}"]);
     await writeFile(join(output, "local-image.json"), JSON.stringify({ schemaVersion: 1, stage: "local-build-unscanned", image: values.tag, imageId, source: prepared.manifest }, null, 2));

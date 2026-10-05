@@ -139,6 +139,29 @@ jobs:
           set -euo pipefail
           npm run image:build -- --tag dojo:scan
           docker build -f apps/control-portal/Dockerfile -t dojo-portal:scan .
+      - name: Verify Dojo root routing
+        run: |
+          set -euo pipefail
+          container="dojo-root-routing-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker run --detach --name "$container" --publish 127.0.0.1::8080 dojo:scan > /dev/null
+          trap 'docker rm --force "$container" > /dev/null 2>&1 || true' EXIT
+          endpoint="$(docker port "$container" 8080/tcp)"
+          port="${endpoint##*:}"
+          for attempt in $(seq 1 90); do
+            if curl --silent --show-error --fail --max-time 2 \
+              "http://127.0.0.1:${port}/WebGoat/actuator/health" > /dev/null 2>&1; then
+              break
+            fi
+            sleep 2
+          done
+          curl --silent --show-error --fail --max-time 5 \
+            "http://127.0.0.1:${port}/WebGoat/actuator/health" > /dev/null
+          headers="$(
+            curl --silent --show-error --dump-header - --output /dev/null \
+              --max-redirs 0 --max-time 5 "http://127.0.0.1:${port}/"
+          )"
+          grep -Eq '^HTTP/[0-9.]+ 302([[:space:]]|$)' <<< "$headers"
+          grep -Eiq '^location: /WebGoat/[[:space:]]*$' <<< "$headers"
       - uses: aquasecurity/setup-trivy@e6c2c5e321ed9123bda567646e2f96565e34abe1 # v0.2.4
         with:
           version: v0.74.0

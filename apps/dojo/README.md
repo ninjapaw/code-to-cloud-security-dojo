@@ -9,6 +9,9 @@ image. The separate control portal is not part of WebGoat's vulnerable runtime.
 file count and a deterministic SHA-256 over file paths/content. Commit the snapshot,
 lock and shared configuration together. The import preserves upstream bytes and
 does not include upstream Git history. Its nested workflows are not root workflows.
+The dojo-owned [overlay](overlay/) remains outside that snapshot. It adds only an
+engine-level Tomcat redirect from the bare `/` path to the canonical `/WebGoat/`
+site; every other request continues through WebGoat unchanged.
 
 ## Refresh Upstream
 
@@ -48,9 +51,10 @@ npm run image:build
 
 This verifies the local snapshot, compiles it with Java 25/Maven in Docker, and
 creates `dojo:local`. The owned generated multi-stage recipe retains the
-upstream runtime recipe and swaps its JAR copy to the builder stage. A recipe-specific
-Docker ignore file includes source (upstream's ignore file allows only prebuilt
-output). Maven wrapper CRLF is normalized **inside the Linux build stage only**.
+upstream runtime recipe, adds the reviewed root-routing overlay, and swaps its JAR
+copy to the builder stage. A recipe-specific Docker ignore file includes source
+(upstream's ignore file allows only prebuilt output). Maven wrapper CRLF is
+normalized **inside the Linux build stage only**.
 
 `-- --tag dojo:scan` selects a different local tag. `-- --prepare-only`
 generates the recipe/context metadata without Docker. Build receipts under ignored

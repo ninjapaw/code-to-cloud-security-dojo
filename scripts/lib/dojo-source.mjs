@@ -204,6 +204,8 @@ export function imageRecipe(upstreamRecipe) {
   const upstreamBase = "FROM docker.io/eclipse-temurin:25-jdk-noble";
   const pinnedBase =
     "eclipse-temurin:25-jdk-noble@sha256:f6366ccac38ceae180280ad7012d18a15e8031548a430dc2bae06631d9e88ed0";
+  const rootRedirect =
+    "overlay/src/main/java/org/owasp/webgoat/container/DojoRootRedirect.java";
   if (
     upstreamRecipe.split(copy).length !== 2 ||
     upstreamRecipe.split(upstreamBase).length !== 2
@@ -211,12 +213,19 @@ export function imageRecipe(upstreamRecipe) {
     throw new Error(
       "Upstream Dockerfile packaging changed; review the image recipe",
     );
-  return `FROM ${pinnedBase} AS dojo-build\nWORKDIR /src\nCOPY . .\nRUN sed -i 's/\\r$//' mvnw && chmod +x mvnw && ./mvnw -B -DskipTests package\n${upstreamRecipe.replace(upstreamBase, `FROM ${pinnedBase}`).replace(copy, "COPY --from=dojo-build --chown=webgoat /src/target/webgoat-*.jar")}\nLABEL name="Code to Cloud Security Dojo" org.opencontainers.image.title="Code to Cloud Security Dojo"\n`;
+  return `FROM ${pinnedBase} AS dojo-build\nWORKDIR /src\nCOPY upstream/ .\nCOPY ${rootRedirect} src/main/java/org/owasp/webgoat/container/DojoRootRedirect.java\nRUN sed -i 's/\\r$//' mvnw && chmod +x mvnw && ./mvnw -B -DskipTests package\n${upstreamRecipe.replace(upstreamBase, `FROM ${pinnedBase}`).replace(copy, "COPY --from=dojo-build --chown=webgoat /src/target/webgoat-*.jar")}\nLABEL name="Code to Cloud Security Dojo" org.opencontainers.image.title="Code to Cloud Security Dojo"\n`;
 }
 
 export async function prepareDojoImage(home, source, output) {
   const manifest = await verifySource(home, source);
   const sourcePath = join(home, "upstream");
+  await readFile(
+    join(
+      home,
+      "overlay/src/main/java/org/owasp/webgoat/container/DojoRootRedirect.java",
+    ),
+    "utf8",
+  );
   const recipe = imageRecipe(
     await readFile(join(sourcePath, "Dockerfile"), "utf8"),
   );
@@ -224,5 +233,5 @@ export async function prepareDojoImage(home, source, output) {
   const dockerfile = join(output, "Dojo.Dockerfile");
   await writeFile(dockerfile, recipe);
   await writeFile(`${dockerfile}.dockerignore`, ".git\n**/target\n");
-  return { sourcePath, dockerfile, manifest };
+  return { contextPath: home, dockerfile, manifest };
 }

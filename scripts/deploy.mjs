@@ -410,7 +410,7 @@ async function main() {
     );
     await mkdir(output, { recursive: true });
     const prepared = await prepareDojoImage(sourceHome, config.source, output);
-    const { sourcePath, dockerfile: recipe } = prepared;
+    const { contextPath, dockerfile: recipe } = prepared;
     const tag = `training-${Date.now()}`;
     const release = {
       schemaVersion: 1,
@@ -426,7 +426,7 @@ async function main() {
       images: {},
     };
     for (const [key, repository, context, dockerfile] of [
-      ["dojo", "dojo", sourcePath, recipe],
+      ["dojo", "dojo", contextPath, recipe],
       [
         "portal",
         "control-portal",

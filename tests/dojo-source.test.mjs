@@ -9,6 +9,7 @@ import {
   verifySource,
   synchronizeSource,
   imageRecipe,
+  prepareDojoImage,
 } from "../scripts/lib/dojo-source.mjs";
 
 test("source snapshot is deterministic, idempotent and refuses modified imports", async () => {
@@ -72,6 +73,11 @@ test("owned image build retains upstream runtime recipe and fails on recipe drif
   );
   assert.match(recipe, /mvnw -B -DskipTests package/);
   assert.ok(recipe.includes("sed -i 's/\\r$//' mvnw"));
+  assert.match(recipe, /COPY upstream\/ \./);
+  assert.match(
+    recipe,
+    /COPY overlay\/src\/main\/java\/org\/owasp\/webgoat\/container\/DojoRootRedirect\.java src\/main\/java\/org\/owasp\/webgoat\/container\/DojoRootRedirect\.java/,
+  );
   assert.match(recipe, /COPY --from=dojo-build/);
   assert.ok(
     recipe.includes('USER webgoat\nENTRYPOINT ["java","-jar","webgoat.jar"]\n'),
@@ -82,6 +88,51 @@ test("owned image build retains upstream runtime recipe and fails on recipe drif
     ),
   );
   assert.throws(() => imageRecipe("FROM changed"), /packaging changed/);
+});
+test("prepared image adds the owned root redirect outside the pinned snapshot", async () => {
+  const home = await mkdtemp(join(tmpdir(), "dojo-image-test-"));
+  const output = join(home, "output");
+  const source = {
+    repository: "https://github.com/WebGoat/WebGoat.git",
+    revision: "a".repeat(40),
+  };
+  const upstreamRecipe =
+    "FROM docker.io/eclipse-temurin:25-jdk-noble\nCOPY --chown=webgoat target/webgoat-*.jar /home/webgoat/webgoat.jar\n";
+  try {
+    await mkdir(join(home, "upstream"), { recursive: true });
+    await writeFile(join(home, "upstream", "Dockerfile"), upstreamRecipe);
+    const manifest = {
+      schemaVersion: 1,
+      ...source,
+      ...(await fingerprint(join(home, "upstream"))),
+    };
+    await writeFile(join(home, "source-lock.json"), JSON.stringify(manifest));
+    const overlay = join(
+      home,
+      "overlay",
+      "src",
+      "main",
+      "java",
+      "org",
+      "owasp",
+      "webgoat",
+      "container",
+    );
+    await mkdir(overlay, { recursive: true });
+    await writeFile(
+      join(overlay, "DojoRootRedirect.java"),
+      "package org.owasp.webgoat.container;\n",
+    );
+    const prepared = await prepareDojoImage(home, source, output);
+    assert.equal(prepared.contextPath, home);
+    assert.deepEqual(prepared.manifest, manifest);
+    assert.match(
+      await readFile(prepared.dockerfile, "utf8"),
+      /COPY overlay\/src\/main\/java\/org\/owasp\/webgoat\/container\/DojoRootRedirect\.java/,
+    );
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
 });
 test("copy-based refresh publishes a complete snapshot and preserves the previous one on fetch failure", async () => {
   const home = await mkdtemp(join(tmpdir(), "dojo-source-refresh-"));

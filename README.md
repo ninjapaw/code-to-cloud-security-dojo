@@ -485,8 +485,10 @@ detection. Subscription Security Reader is read-only but broad; review its bound
 
 Open the printed WebGoat URL
 (`https://<dojo-app-name>.azurewebsites.net/WebGoat/`) for interactive lessons.
-The release IaC also returns it as `dojoUrl`. WebGoat uses its own lesson accounts:
-create disposable training credentials, never reuse the portal admin password.
+The bare app URL redirects to that canonical path instead of returning Tomcat's
+default 404, and the release IaC also returns the canonical URL as `dojoUrl`.
+WebGoat uses its own lesson accounts: create disposable training credentials,
+never reuse the portal admin password.
 The default profile permits all public IPs over HTTPS. Admin-IP-only and private
 profiles require their configured network path. Its private endpoint and
 Internet-denied outbound subnet remain in place; it is not reverse-proxied into
