@@ -210,7 +210,7 @@ test("portal accepts large validated receipts only after session, origin and CSR
 test("portal client publishes both receipts, collects a scope-bound report and revokes its session", async (t) => {
   const portal = await startPortal(t);
   const receipts = await Promise.all([receiptFor(), receiptFor(nginxProxy.id)]);
-  const report = await withPortalSession(config, null, async (client) => {
+  const report = await withPortalSession(config, async (client) => {
     for (const receipt of receipts)
       assert.deepEqual(await client.publish(receipt), imageReceiptMetadata(receipt));
     return client.report();
@@ -225,7 +225,7 @@ test("portal publication fails closed on audit failure and still revokes the CLI
   const portal = await startPortal(t);
   const receipt = await receiptFor();
   const put = portal.store.put.bind(portal.store);
-  await assert.rejects(withPortalSession(config, null, async (client) => {
+  await assert.rejects(withPortalSession(config, async (client) => {
     portal.store.put = async (key, value, options) => {
       if (value.event === "image-receipt-publication")
         throw new Error("sensitive service error");
@@ -252,7 +252,7 @@ test("portal client rejects stale or wrong-scope reports and revokes failed sess
         },
       });
       await assert.rejects(
-        withPortalSession(config, null, (client) => client.report(), portal.clientOptions),
+        withPortalSession(config, (client) => client.report(), portal.clientOptions),
         /stale or does not match/,
       );
       assert.ok((await portal.store.list("sessions/")).every((session) => session.revoked));
@@ -265,7 +265,7 @@ test("portal client never follows credential redirects or reports returned secre
     value: name === "admin-username" ? config.adminUsername : config.adminPassword,
   }) };
   let calls = 0;
-  await assert.rejects(withPortalSession(config, null, () => {}, {
+  await assert.rejects(withPortalSession(config, () => {}, {
     secrets,
     fetcher: async (_url, options) => {
       calls++;
@@ -279,7 +279,7 @@ test("portal client never follows credential redirects or reports returned secre
 test("portal client rejects a mismatched receipt acknowledgement and revokes its session", async (t) => {
   const portal = await startPortal(t);
   const fetcher = portal.clientOptions.fetcher;
-  await assert.rejects(withPortalSession(config, null, async (client) => {
+  await assert.rejects(withPortalSession(config, async (client) => {
     await client.publish(await receiptFor());
   }, {
     ...portal.clientOptions,
@@ -302,4 +302,12 @@ test("read-only preview cannot publish image receipts", async (t) => {
   });
   assert.equal(response.status, 403);
   assert.equal((await portal.store.list("images/")).length, 0);
+});
+
+test("portal Key Vault authentication is tenant-bound rather than subscription-bound", async () => {
+  const source = await readFile(
+    new URL("../scripts/lib/portal-client.mjs", import.meta.url), "utf8",
+  );
+  assert.match(source, /new AzureCliCredential\(\{\s*tenantId: config\.tenantId\s*\}\)/);
+  assert.doesNotMatch(source, /subscription:\s*config\.subscriptionId/);
 });

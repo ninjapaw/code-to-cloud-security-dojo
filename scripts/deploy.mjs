@@ -626,7 +626,7 @@ async function main() {
         "Recording optional image evidence in private Blob storage",
       );
       if (values["via-portal"]) {
-        await withPortalSession(config, client.credential, async (portal) => {
+        await withPortalSession(config, async (portal) => {
           for (const receipt of imageReceipts) await portal.publish(receipt);
         });
       } else {
@@ -649,7 +649,7 @@ async function main() {
     let report;
     let evidenceError;
     if (values["via-portal"]) {
-      report = await withPortalSession(config, client.credential, (portal) => portal.report());
+      report = await withPortalSession(config, (portal) => portal.report());
     } else {
       const store = new BlobEvidenceStore(resourceNames.storage, client.credential);
       let runs = [];

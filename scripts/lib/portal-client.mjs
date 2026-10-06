@@ -1,4 +1,5 @@
 import { SecretClient } from "@azure/keyvault-secrets";
+import { AzureCliCredential } from "@azure/identity";
 import { names } from "../../shared/config.mjs";
 import { validCredentialValue } from "../../shared/credentials.mjs";
 import { readJsonResponse } from "../../shared/http-json.mjs";
@@ -9,14 +10,14 @@ import {
 
 export async function withPortalSession(
   config,
-  credential,
   callback,
   { fetcher = fetch, secrets } = {},
 ) {
   const resourceNames = names(config);
   const origin = `https://${resourceNames.portal}.azurewebsites.net`;
   const vault = secrets || new SecretClient(
-    `https://${resourceNames.vault}.vault.azure.net`, credential,
+    `https://${resourceNames.vault}.vault.azure.net`,
+    new AzureCliCredential({ tenantId: config.tenantId }),
   );
   const username = (await vault.getSecret("admin-username")).value;
   const password = (await vault.getSecret("admin-password")).value;
