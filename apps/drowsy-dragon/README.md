@@ -90,6 +90,10 @@ The enabled release builds/scans a third image and pushes it to the lab ACR.
 Portal HIGH/CRITICAL findings still block release; Drowsy Dragon findings are
 retained for review rather than suppressed or converted to a production exception.
 Changing configuration invalidates the old release manifest.
+When Blob storage is private to the lab VNet, add `--via-portal` to `deploy`,
+`verify` and `report` as described in the root
+[private publication guide](../../README.md#publish-and-verify-through-the-private-portal-connection).
+The receipt must be stored and verified before deployment; do not bypass this gate.
 Rollbacks also require the matching reviewed demo recipe and metadata, not only
 an old release manifest with the same configuration.
 

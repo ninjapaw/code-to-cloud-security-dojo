@@ -100,6 +100,7 @@ export function accessSettings(config) {
     ["keyVaultRestrictToAdminIp", false],
     ["dojoPublicAccess", true],
     ["dojoRestrictToAdminIp", false],
+    ["evidencePublicAccess", true],
   ]) {
     const value = config[key] === undefined ? fallback : config[key];
     if (typeof value !== "boolean")

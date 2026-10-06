@@ -93,6 +93,11 @@ node scripts/deploy.mjs report
 All enabled images must finish scanning before any push. Portal HIGH/CRITICAL
 findings still block the release; training-image findings are preserved for
 explicit review. Configuration or mode changes invalidate old release manifests.
+For a workstation without private Blob connectivity, use `deploy --via-portal`
+and `verify --via-portal` with the root
+[private publication workflow](../../README.md#publish-and-verify-through-the-private-portal-connection).
+It publishes the digest-bound scan before deployment and collects private NGINX
+startup measurements without enabling public workload access.
 
 The site has public network access disabled, a private endpoint, its own plan and
 ACR-only pull identity. Its `/health` probe goes through NGINX on port 80, not

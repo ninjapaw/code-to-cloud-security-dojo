@@ -186,6 +186,7 @@ export function foundationParameters(config) {
     keyVaultPublicAccess: access.keyVaultPublicAccess,
     keyVaultRestrictToAdminIp: access.keyVaultRestrictToAdminIp,
     keyVaultPublicAccessTags: access.keyVaultPublicAccessTags,
+    evidencePublicAccess: access.evidencePublicAccess,
   };
 }
 

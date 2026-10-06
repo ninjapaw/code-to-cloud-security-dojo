@@ -30,6 +30,7 @@ test("access defaults preserve current behavior without rewriting older configur
     keyVaultRestrictToAdminIp: false,
     dojoPublicAccess: true,
     dojoRestrictToAdminIp: false,
+    evidencePublicAccess: true,
     keyVaultPublicAccessTags: { SecurityControl: "Ignore" },
   };
   assert.deepEqual(accessSettings(base), expected);
@@ -46,6 +47,7 @@ test("public and admin-IP access switches accept only booleans", () => {
     "keyVaultRestrictToAdminIp",
     "dojoPublicAccess",
     "dojoRestrictToAdminIp",
+    "evidencePublicAccess",
   ]) {
     for (const value of [true, false]) {
       const selected = { ...config, [key]: value };

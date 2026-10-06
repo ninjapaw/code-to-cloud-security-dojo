@@ -1,6 +1,7 @@
 import { isLabHostname, names } from "./config.mjs";
 import { imageEvidenceKey } from "./image-evidence.mjs";
 import { nginxProxy, summarizeNginxReceipt, validateNginxRuntime } from "./nginx-proxy.mjs";
+import { readJsonResponse } from "./http-json.mjs";
 
 export async function readNginxRuntime(host, expectedName, mode, fetcher = fetch) {
   if (!isLabHostname(host, expectedName))
@@ -9,30 +10,8 @@ export async function readNginxRuntime(host, expectedName, mode, fetcher = fetch
     redirect: "error",
     signal: AbortSignal.timeout(8000),
   });
-  if (!response.ok)
-    throw new Error(`NGINX Proxy evidence returned HTTP ${response.status}; check private connectivity`);
-  if (!/^application\/json(?:;|$)/i.test(response.headers.get("content-type") || ""))
-    throw new Error("NGINX Proxy evidence did not return JSON");
-  const reader = response.body?.getReader();
-  if (!reader) throw new Error("NGINX Proxy evidence body is missing");
-  const chunks = [];
-  let size = 0;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      size += value.byteLength;
-      if (size > 65536) {
-        await reader.cancel();
-        throw new Error("NGINX Proxy evidence exceeds the 64 KiB collection limit");
-      }
-      chunks.push(value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
   return validateNginxRuntime(
-    JSON.parse(Buffer.concat(chunks, size).toString("utf8")), mode,
+    await readJsonResponse(response, 65536, "NGINX Proxy evidence"), mode,
   );
 }
 

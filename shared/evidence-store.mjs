@@ -31,11 +31,12 @@ export class BlobEvidenceStore {
       throw error;
     }
   }
-  async put(name, value) {
+  async put(name, value, { ifAbsent = false } = {}) {
     const data = Buffer.from(JSON.stringify(value));
     await this.container.getBlockBlobClient(name).uploadData(data, {
       abortSignal: AbortSignal.timeout(10000),
       blobHTTPHeaders: { blobContentType: "application/json" },
+      conditions: ifAbsent ? { ifNoneMatch: "*" } : undefined,
     });
   }
   async list(prefix, limit = 100) {
@@ -99,7 +100,9 @@ export class MemoryEvidenceStore {
   async get(name) {
     return structuredClone(this.items.get(name) || null);
   }
-  async put(name, value) {
+  async put(name, value, { ifAbsent = false } = {}) {
+    if (ifAbsent && this.items.has(name))
+      throw Object.assign(new Error("Evidence already exists"), { statusCode: 412 });
     this.items.set(name, structuredClone(value));
   }
   async list(prefix, limit = 100) {

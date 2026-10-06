@@ -238,6 +238,7 @@ to [foundation.bicep](infra/foundation.bicep), and Dojo settings to
 | `keyVaultPublicAccessTags` | `{"SecurityControl":"Ignore"}` | Vault-only tags for your public-network policy exception. Use `{}` for no exception, or provide your organization's reviewed tags. |
 | `dojoPublicAccess` | `true` | Enable the WebGoat website's public endpoint; `false` requires private connectivity. |
 | `dojoRestrictToAdminIp` | `false` | When public access is enabled, `true` limits it to the configured admin `/32`; `false` allows all networks. |
+| `evidencePublicAccess` | `true` | Enable the evidence account's admin-IP-restricted public endpoint. Set `false` to require Private Link and use `--via-portal` or an authorized private-network runner. Shared keys and anonymous blob access remain disabled. |
 
 Public-access switches must be JSON booleans, not `"true"`/`"false"` strings.
 Policy tags must have nonempty names and string values, and cannot override lab
@@ -430,6 +431,38 @@ Enabled Drowsy Dragon releases also require `--accept-costs` and preserve a
 digest/scan-hash-bound receipt in the private evidence store. ACI readback and
 package findings appear in the portal and HTML/JSON reports; no HTTP test is
 sent to the sleeping container.
+
+#### Publish and Verify Through the Private Portal Connection
+
+When the workstation cannot reach private Blob storage, use the existing
+admin-IP-restricted portal as the authenticated evidence path:
+
+```text
+node scripts/deploy.mjs deploy --confirm "deploy:<release-hash>:<subscription-id>:<resource-group>" --accept-costs --via-portal
+node scripts/deploy.mjs verify --via-portal
+node scripts/deploy.mjs report --via-portal
+```
+
+The CLI reads the shared username/password from Key Vault using the signed-in
+Azure identity, holds credentials and session tokens only in memory, and revokes
+its session after the operation. The portal enforces its usual origin, session,
+CSRF and rate limits before accepting a bounded image receipt. Only the reviewed
+Drowsy Dragon and NGINX receipt formats are accepted; all artifact hashes and
+package coverage are checked. Receipt keys are derived from the demo, ACR digest
+and scan hash. Writes are create-only with exact readback; matching retries are
+idempotent and conflicting evidence stops deployment. Receipt publication must
+succeed before ARM deployment; no direct-deployment bypass is required.
+
+The portal must already include the receipt endpoint. For an older installation,
+first build/scan/push a reviewed portal image and apply only its digest while
+preserving its settings, identity and network controls, then run the full guarded
+release above. If the vault is private too, run the CLI from an authorized path
+that can read its credentials. Do not expose storage, widen vault access, or
+export credentials to work around connectivity.
+
+`--via-portal` verification collects private scan receipts, run records and NGINX
+startup measurements through the portal's VNet connection. It still reports
+unknown Defender connector/detection evidence rather than treating it as success.
 
 ### Sign In and Walk Through the Story
 

@@ -7,6 +7,11 @@ import { Sessions, equalSecret } from "./auth.mjs";
 import { runLabTest, readDojoHealth, tests } from "./lab.mjs";
 import { story, reportHtml } from "../../shared/report.mjs";
 import { validCredentialValue } from "../../shared/credentials.mjs";
+import {
+  imageReceiptLimit,
+  imageReceiptMetadata,
+  publishImageReceipt,
+} from "../../shared/receipt-publishing.mjs";
 
 export function createApp({
   config,
@@ -27,6 +32,7 @@ export function createApp({
     config.sessionKey || "preview-no-session",
     store,
   );
+  let reportCache;
   app.disable("x-powered-by");
   app.set("trust proxy", false);
   app.use(
@@ -49,7 +55,6 @@ export function createApp({
     response.setHeader("Cache-Control", "no-store");
     next();
   });
-  app.use(express.json({ limit: "2kb" }));
   app.get("/health", (_request, response) =>
     response.json({
       status: "running",
@@ -121,6 +126,40 @@ export function createApp({
     next();
   });
   app.post(
+    "/api/image-evidence",
+    rateLimit({
+      windowMs: 60000,
+      limit: 10,
+      standardHeaders: "draft-8",
+      legacyHeaders: false,
+      validate: { xForwardedForHeader: false },
+    }),
+    express.json({ limit: imageReceiptLimit, inflate: false }),
+    async (request, response) => {
+      let metadata;
+      try {
+        metadata = imageReceiptMetadata(request.body);
+      } catch {
+        return response.status(400).json({ error: "Invalid image receipt." });
+      }
+      await store.put(
+        `audit/${new Date().toISOString()}-${randomUUID()}.json`,
+        { event: "image-receipt-publication", at: new Date().toISOString(), ...metadata },
+      );
+      try {
+        const result = await publishImageReceipt(store, request.body);
+        reportCache = null;
+        return response.json(result);
+      } catch (error) {
+        if (error.status !== 409) throw error;
+        return response.status(409).json({
+          error: "Image receipt readback conflicts with the submitted evidence.",
+        });
+      }
+    },
+  );
+  app.use(express.json({ limit: "2kb" }));
+  app.post(
     "/api/login",
     rateLimit({
       windowMs: 15 * 60000,
@@ -177,7 +216,6 @@ export function createApp({
     });
     response.json({ signedOut: true });
   });
-  let reportCache;
   let collecting;
   const report = async () => {
     if (reportCache && Date.now() - reportCache.time < 30000)

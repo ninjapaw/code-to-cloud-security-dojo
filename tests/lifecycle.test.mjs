@@ -479,6 +479,20 @@ test("temporary credential worker is private, VNet-integrated and vault-scoped",
   assert.doesNotMatch(worker, /(?:adminIpv4Address|clientSecret|password):/);
   assert.match(lifecycle, /"webapp",\s*"delete"[\s\S]*?"--keep-empty-plan"/);
 });
+test("private evidence access reaches foundation without leaking into release parameters", async () => {
+  for (const evidencePublicAccess of [false, true]) {
+    const selected = { ...config, evidencePublicAccess };
+    assert.equal(foundationParameters(selected).evidencePublicAccess, evidencePublicAccess);
+    assert.equal(Object.hasOwn(releaseParameters(selected, releaseFor(selected)), "evidencePublicAccess"), false);
+  }
+  const foundation = await readFile(
+    new URL("../infra/foundation.bicep", import.meta.url), "utf8",
+  );
+  assert.match(foundation, /param evidencePublicAccess bool = true/);
+  assert.match(foundation, /publicNetworkAccess: evidencePublicAccess \? 'Enabled' : 'Disabled'/);
+  assert.match(foundation, /allowSharedKeyAccess: false/);
+  assert.match(foundation, /allowBlobPublicAccess: false/);
+});
 test("network settings reach only their intended deployment templates", () => {
   for (const keyVaultPublicAccess of [false, true]) {
     for (const keyVaultRestrictToAdminIp of [false, true]) {

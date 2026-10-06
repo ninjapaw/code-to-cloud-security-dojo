@@ -17,6 +17,8 @@ param keyVaultRestrictToAdminIp bool = false
 @description('Vault-only policy tags for public access. Use an empty object when no exception is required.')
 param keyVaultPublicAccessTags object = { SecurityControl: 'Ignore' }
 param storageName string
+@description('Allow admin-IP-restricted public evidence access. Set false to require Private Link and publish through the portal or an authorized private-network runner.')
+param evidencePublicAccess bool = true
 param portalName string
 param dojoName string
 param nginxProxyEnabled bool = false
@@ -147,7 +149,7 @@ resource storage 'Microsoft.Storage/storageAccounts@2025-01-01' = {
     supportsHttpsTrafficOnly: true
     allowBlobPublicAccess: false
     allowSharedKeyAccess: false
-    publicNetworkAccess: 'Enabled'
+    publicNetworkAccess: evidencePublicAccess ? 'Enabled' : 'Disabled'
     networkAcls: { defaultAction: 'Deny', bypass: 'None', ipRules: [{ value: adminIpv4Address, action: 'Allow' }] }
   }
 }

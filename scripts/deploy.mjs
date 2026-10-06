@@ -20,7 +20,8 @@ import { collectReport, reportHtml } from "../shared/report.mjs";
 import { BlobEvidenceStore } from "../shared/evidence-store.mjs";
 import { drowsyDragon } from "../shared/drowsy-dragon.mjs";
 import { nginxProxy, nginxMode } from "../shared/nginx-proxy.mjs";
-import { imageEvidenceKey } from "../shared/image-evidence.mjs";
+import { publishImageReceipt } from "../shared/receipt-publishing.mjs";
+import { withPortalSession } from "./lib/portal-client.mjs";
 import { buildNginxProxy, readNginxReceipt } from "./lib/nginx-proxy.mjs";
 import { buildDrowsyDragon, readDragonReceipt } from "./lib/drowsy-dragon.mjs";
 import { createDeploymentStatus } from "./lib/deployment-status.mjs";
@@ -52,6 +53,7 @@ const { values, positionals } = parseArgs({
     "evidence-exported": { type: "boolean" },
     release: { type: "string" },
     audit: { type: "boolean" },
+    "via-portal": { type: "boolean" },
   },
 });
 const action = positionals[0] || "plan";
@@ -84,6 +86,8 @@ const updateStatus = async (detail) => {
 async function main() {
   if (!allowed.includes(action) || positionals.length > 1)
     throw new Error(`Action must be one of: ${allowed.join(", ")}`);
+  if (values["via-portal"] && !["deploy", "repair", "verify", "report", "what-if"].includes(action))
+    throw new Error("--via-portal is supported only for deployment and evidence collection");
   const config = await loadConfig({
     offline: action === "plan" || action.startsWith("source-") || values.audit,
   });
@@ -621,19 +625,14 @@ async function main() {
       await updateStatus(
         "Recording optional image evidence in private Blob storage",
       );
-      const store = new BlobEvidenceStore(
-        resourceNames.storage,
-        client.credential,
-      );
-      for (const receipt of imageReceipts)
-        await store.put(
-          imageEvidenceKey(
-            receipt.demoId,
-            receipt.imageDigest,
-            receipt.hashes.scanJson,
-          ),
-          receipt,
-        );
+      if (values["via-portal"]) {
+        await withPortalSession(config, client.credential, async (portal) => {
+          for (const receipt of imageReceipts) await portal.publish(receipt);
+        });
+      } else {
+        const store = new BlobEvidenceStore(resourceNames.storage, client.credential);
+        for (const receipt of imageReceipts) await publishImageReceipt(store, receipt);
+      }
     }
     await deployTemplate("main", parameters);
     await writeFile(
@@ -647,18 +646,20 @@ async function main() {
   }
   if (["verify", "report"].includes(action)) {
     await updateStatus("Collecting scoped Azure and Blob evidence");
-    const store = new BlobEvidenceStore(
-      resourceNames.storage,
-      client.credential,
-    );
-    let runs = [];
+    let report;
     let evidenceError;
-    try {
-      runs = await store.list("runs/");
-    } catch (error) {
-      evidenceError = error.message;
+    if (values["via-portal"]) {
+      report = await withPortalSession(config, client.credential, (portal) => portal.report());
+    } else {
+      const store = new BlobEvidenceStore(resourceNames.storage, client.credential);
+      let runs = [];
+      try {
+        runs = await store.list("runs/");
+      } catch (error) {
+        evidenceError = error.message;
+      }
+      report = await collectReport(config, client, runs, store);
     }
-    const report = await collectReport(config, client, runs, store);
     await updateStatus(
       "Checking deployed sites and writing the evidence report",
     );
@@ -668,7 +669,11 @@ async function main() {
         state: "unknown",
         detail: evidenceError,
       });
-    for (const name of [resourceNames.portal, resourceNames.dojo]) {
+    for (const name of [
+      resourceNames.portal,
+      resourceNames.dojo,
+      ...(config.nginxProxyEnabled ? [resourceNames.nginxProxy] : []),
+    ]) {
       try {
         const site = await client.request(
           `${groupPath}/providers/Microsoft.Web/sites/${name}?api-version=2024-11-01`,
