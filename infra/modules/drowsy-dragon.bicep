@@ -52,7 +52,7 @@ resource dragon 'Microsoft.ContainerInstance/containerGroups@2023-05-01' = {
       {
         name: 'drowsy-dragon'
         properties: {
-          image: '${registry.properties.loginServer}/drowsy-dragon@${imageDigest}'
+          image: '${registry.properties.loginServer}/${name}@${imageDigest}'
           resources: { requests: { cpu: 1, memoryInGB: 1 } }
         }
       }

@@ -191,6 +191,7 @@ export function foundationParameters(config) {
 }
 
 export function validateRelease(config, release) {
+  const resourceNames = names(config);
   if (
     !/^[a-f0-9]{64}$/.test(release.source?.snapshotSha256) ||
     !/^[a-f0-9]{40}$/.test(release.source?.tree) ||
@@ -225,15 +226,20 @@ export function validateRelease(config, release) {
       !/^[a-f0-9]{64}$/.test(release.images[image].scanHash)
     )
       throw new Error(`Missing digest, image ID or scan evidence: ${image}`);
+    const entry = release.images[image];
+    const prefix = `${resourceNames.registry}.azurecr.io/${resourceNames[image]}:`;
+    if (
+      entry.repository !== resourceNames[image] ||
+      typeof entry.image !== "string" ||
+      !entry.image.startsWith(prefix) ||
+      !/^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/.test(entry.image.slice(prefix.length))
+    )
+      throw new Error(`Image repository must match the deployed app name: ${image}`);
   }
   if (config.drowsyDragonEnabled) {
     const entry = release.images.drowsyDragon;
     if (
-      entry.repository !== drowsyDragon.id ||
       entry.baseImage !== drowsyDragon.baseImage ||
-      !entry.image?.startsWith(
-        `${names(config).registry}.azurecr.io/drowsy-dragon:`,
-      ) ||
       !/^sha256:[a-f0-9]{64}$/.test(entry.imageId || "") ||
       !/^[a-f0-9]{40}$/.test(entry.sourceRevision || "") ||
       !Number.isFinite(Date.parse(entry.scannedAt)) ||
@@ -251,13 +257,9 @@ export function validateRelease(config, release) {
   if (config.nginxProxyEnabled) {
     const entry = release.images.nginxProxy;
     if (
-      entry.repository !== nginxProxy.id ||
       entry.mode !== nginxMode(config.nginxProxyMode).mode ||
       entry.dockerfileHash !== nginxProxy.dockerfileHash ||
       entry.sourceSnapshotHash !== nginxProxy.source.sha256 ||
-      !entry.image?.startsWith(
-        `${names(config).registry}.azurecr.io/nginx-proxy:`,
-      ) ||
       !/^sha256:[a-f0-9]{64}$/.test(entry.imageId || "") ||
       !/^[a-f0-9]{40}$/.test(entry.sourceRevision || "") ||
       !Number.isFinite(Date.parse(entry.scannedAt)) ||

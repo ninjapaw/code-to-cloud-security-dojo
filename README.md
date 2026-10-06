@@ -63,6 +63,21 @@ The `dojo` workload uses a pinned WebGoat source snapshot. The Node/Express
 [Foundation IaC](infra/foundation.bicep) creates dependencies before
 [release IaC](infra/main.bicep) selects reviewed image digests.
 
+Each deployed ACR image repository matches its Azure app resource name:
+`dojo-<suffix>-app` for WebGoat, `dojo-<suffix>-portal` for the admin portal,
+`dojo-<suffix>-dragon` for Drowsy Dragon, and `dojo-<suffix>-proxy` for NGINX.
+The build, release validation, IaC and runtime evidence use the same names.
+Deployments remain pinned to `registry/app-name@sha256:...`; training tags
+identify builds but are not used as mutable deployment references. Standalone
+local demo builds retain their short image names.
+
+After upgrading from the legacy `dojo`, `control-portal`, `drowsy-dragon` and
+`nginx-proxy` repositories, build and scan a new release before running
+`what-if` and `deploy`. Legacy release manifests are rejected rather than
+silently deploying an image under the wrong app name. Old repositories and
+release evidence are not automatically deleted and remain available for rollback
+with their matching source revision.
+
 - Two Linux App Service plans (default B2), one Basic ACR and two pull identities.
 - Optional Drowsy Dragon ACI with its own ACR-only pull identity, no IP address,
   no exposed ports and no portal/evidence credentials. It has no HTTP endpoint.

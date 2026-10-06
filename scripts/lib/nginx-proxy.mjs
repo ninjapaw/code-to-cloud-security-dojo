@@ -27,7 +27,7 @@ export async function verifyNginxSource(directory = home) {
   return manifest;
 }
 
-export async function buildNginxProxy(image, output, selectedMode, { execute = run } = {}) {
+export async function buildNginxProxy(image, output, selectedMode, { execute = run, repository = nginxProxy.id } = {}) {
   const mode = nginxMode(selectedMode);
   const source = await verifyNginxSource();
   const dockerfile = await readFile(recipePath, "utf8");
@@ -55,7 +55,7 @@ export async function buildNginxProxy(image, output, selectedMode, { execute = r
   validateNginxInventory(summary.packages, mode.mode);
   await verifyNginxSource();
   const entry = {
-    repository: nginxProxy.id,
+    repository,
     image,
     mode: mode.mode,
     sourceRevision,

@@ -94,6 +94,7 @@ function receiptFixture() {
 
 function releaseFixture(configuration) {
   const receipt = receiptFixture();
+  const resourceNames = names(configuration);
   return {
     schemaVersion: 1,
     codeRevision: "0".repeat(40),
@@ -105,13 +106,21 @@ function releaseFixture(configuration) {
       files: 1,
     },
     images: {
-      dojo: { digest, imageId, scanHash: "f".repeat(64) },
-      portal: { digest, imageId, scanHash: "f".repeat(64) },
+      dojo: {
+        repository: resourceNames.dojo,
+        image: `${resourceNames.registry}.azurecr.io/${resourceNames.dojo}:fixture`,
+        digest, imageId, scanHash: "f".repeat(64),
+      },
+      portal: {
+        repository: resourceNames.portal,
+        image: `${resourceNames.registry}.azurecr.io/${resourceNames.portal}:fixture`,
+        digest, imageId, scanHash: "f".repeat(64),
+      },
       ...(configuration.drowsyDragonEnabled
         ? {
             drowsyDragon: {
-              repository: drowsyDragon.id,
-              image: `${names(configuration).registry}.azurecr.io/drowsy-dragon:fixture`,
+              repository: resourceNames.drowsyDragon,
+              image: `${resourceNames.registry}.azurecr.io/${resourceNames.drowsyDragon}:fixture`,
               digest,
               imageId,
               baseImage: drowsyDragon.baseImage,
@@ -307,9 +316,16 @@ test("builder captures isolated inventory and all-severity scans; tampered artif
     return "";
   };
   try {
-    const entry = await buildDrowsyDragon("drowsy-dragon:test", output, {
+    const repository = names(config).drowsyDragon;
+    const entry = await buildDrowsyDragon(`${repository}:test`, output, {
       execute,
+      repository,
     });
+    assert.equal(entry.repository, repository);
+    assert.equal(
+      JSON.parse(await readFile(join(output, "local-image.json"), "utf8")).repository,
+      repository,
+    );
     const build = calls.find(
       ([command, args]) => command === "docker" && args[0] === "build",
     )[1];
@@ -370,7 +386,7 @@ function cloudFixture(configuration = config) {
         {
           name: "drowsy-dragon",
           properties: {
-            image: `${resourceNames.registry}.azurecr.io/drowsy-dragon@${digest}`,
+            image: `${resourceNames.registry}.azurecr.io/${resourceNames.drowsyDragon}@${digest}`,
             instanceView: { currentState: { state: "Running" } },
           },
         },
@@ -438,7 +454,7 @@ test("collector correlates actual ACI state, digest-bound package evidence and e
   );
   assert.match(
     report.release.drowsyDragonObservedImage,
-    /drowsy-dragon@sha256:/,
+    /-dragon@sha256:/,
   );
   assert.match(reportHtml(report), /TEST-DRAGON-0001/);
   assert.match(reportHtml(report), /this is not a Defender assessment/);
@@ -493,6 +509,10 @@ test("runtime drift, wrong images and retained disabled instances are gaps, not 
     },
     (instance) => {
       instance.properties.containers[0].properties.image = `other.azurecr.io/drowsy-dragon@${digest}`;
+    },
+    (instance) => {
+      instance.properties.containers[0].properties.image =
+        `${names(config).registry}.azurecr.io/drowsy-dragon@${digest}`;
     },
     (instance) => {
       instance.properties.containers.push({
@@ -564,7 +584,7 @@ test("ACI recipe is opt-in, digest-bound and pull-only, without ingress or workl
     module,
     /Microsoft\.ContainerInstance\/containerGroups@2023-05-01/,
   );
-  assert.match(module, /drowsy-dragon@\$\{imageDigest\}/);
+  assert.match(module, /\$\{name\}@\$\{imageDigest\}/);
   assert.match(module, /7f951dda-4ed3-4680-a7ca-43fe172d538d/);
   assert.match(module, /identity: identity\.id/);
   assert.doesNotMatch(

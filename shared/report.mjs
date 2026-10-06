@@ -228,7 +228,7 @@ export async function collectReport(config, client, runs = [], evidenceStore, { 
       const containers = properties.containers || [];
       const container = containers.find((item) => item.name === drowsyDragon.id);
       const image = container?.properties?.image;
-      const prefix = `${names(config).registry}.azurecr.io/drowsy-dragon@`;
+      const prefix = `${names(config).registry}.azurecr.io/${names(config).drowsyDragon}@`;
       if (
         typeof image === "string" &&
         image.startsWith(prefix) &&

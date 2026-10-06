@@ -53,7 +53,7 @@ export async function collectNginxStory({ config, client, report, collect, evide
     ]);
     const properties = site.properties || {};
     const image = web.properties?.linuxFxVersion;
-    const prefix = `DOCKER|${resourceNames.registry}.azurecr.io/nginx-proxy@`;
+    const prefix = `DOCKER|${resourceNames.registry}.azurecr.io/${resourceNames.nginxProxy}@`;
     if (typeof image === "string" && image.startsWith(prefix) &&
       /^sha256:[a-f0-9]{64}$/.test(image.slice(prefix.length)))
       digest = image.slice(prefix.length);

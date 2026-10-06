@@ -34,6 +34,7 @@ const config = JSON.parse(
   await readFile(new URL("../config/deploy.config.json", import.meta.url)),
 );
 function releaseFor(selected) {
+  const resourceNames = names(selected);
   return {
     schemaVersion: 1,
     codeRevision: "0".repeat(40),
@@ -46,11 +47,15 @@ function releaseFor(selected) {
     },
     images: {
       portal: {
+        repository: resourceNames.portal,
+        image: `${resourceNames.registry}.azurecr.io/${resourceNames.portal}:test`,
         digest: `sha256:${"a".repeat(64)}`,
         imageId: `sha256:${"b".repeat(64)}`,
         scanHash: "c".repeat(64),
       },
       dojo: {
+        repository: resourceNames.dojo,
+        image: `${resourceNames.registry}.azurecr.io/${resourceNames.dojo}:test`,
         digest: `sha256:${"d".repeat(64)}`,
         imageId: `sha256:${"e".repeat(64)}`,
         scanHash: "f".repeat(64),
@@ -742,4 +747,15 @@ test("release must carry immutable digests, scan hashes and exact config provena
     }),
   );
   assert.throws(() => validateRelease(config, { ...release, images: {} }));
+});
+
+test("App Service images use their deployed app names and immutable digests", async () => {
+  const main = await readFile(
+    new URL("../infra/main.bicep", import.meta.url), "utf8",
+  );
+  for (const key of ["dojo", "portal", "nginxProxy"]) {
+    assert.ok(main.includes(
+      `image: '\${registry.properties.loginServer}/\${${key}Name}@\${${key}Digest}'`,
+    ));
+  }
 });

@@ -14,7 +14,7 @@ import { captureImageEvidence } from "./image-evidence.mjs";
 const home = fileURLToPath(new URL("apps/drowsy-dragon/", root));
 const recipePath = join(home, "Dockerfile");
 
-export async function buildDrowsyDragon(image, output, { execute = run } = {}) {
+export async function buildDrowsyDragon(image, output, { execute = run, repository = drowsyDragon.id } = {}) {
   const dockerfile = await readFile(recipePath, "utf8");
   if (dockerfile.replace(/\r\n/g, "\n") !== drowsyDragonRecipe)
     throw new Error("Review the Drowsy Dragon recipe and approved pin before building");
@@ -36,7 +36,7 @@ export async function buildDrowsyDragon(image, output, { execute = run } = {}) {
     image, output, drowsyDragon, { execute },
   );
   const entry = {
-    repository: drowsyDragon.id,
+    repository,
     image,
     ...evidence,
     sourceRevision,

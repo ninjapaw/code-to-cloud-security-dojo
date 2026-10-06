@@ -430,10 +430,10 @@ async function main() {
       images: {},
     };
     for (const [key, repository, context, dockerfile] of [
-      ["dojo", "dojo", contextPath, recipe],
+      ["dojo", resourceNames.dojo, contextPath, recipe],
       [
         "portal",
-        "control-portal",
+        resourceNames.portal,
         fileURLToPath(root),
         "apps/control-portal/Dockerfile",
       ],
@@ -492,15 +492,17 @@ async function main() {
     }
     if (config.drowsyDragonEnabled) {
       release.images.drowsyDragon = await buildDrowsyDragon(
-        `${resourceNames.registry}.azurecr.io/drowsy-dragon:${tag}`,
+        `${resourceNames.registry}.azurecr.io/${resourceNames.drowsyDragon}:${tag}`,
         join(output, `drowsy-dragon-${tag}`),
+        { repository: resourceNames.drowsyDragon },
       );
     }
     if (config.nginxProxyEnabled) {
       release.images.nginxProxy = await buildNginxProxy(
-        `${resourceNames.registry}.azurecr.io/nginx-proxy:${tag}`,
+        `${resourceNames.registry}.azurecr.io/${resourceNames.nginxProxy}:${tag}`,
         join(output, `nginx-proxy-${tag}`),
         config.nginxProxyMode,
+        { repository: resourceNames.nginxProxy },
       );
     }
     for (const entry of Object.values(release.images)) {

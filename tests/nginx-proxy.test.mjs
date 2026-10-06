@@ -113,6 +113,7 @@ function runtimeFixture(mode = "vulnerable") {
 
 function releaseFixture(configuration) {
   const receipt = receiptFixture(configuration.nginxProxyMode);
+  const resourceNames = names(configuration);
   const common = {
     digest,
     imageId,
@@ -136,15 +137,23 @@ function releaseFixture(configuration) {
       files: 1,
     },
     images: {
-      dojo: { digest, imageId, scanHash: "f".repeat(64) },
-      portal: { digest, imageId, scanHash: "f".repeat(64) },
+      dojo: {
+        repository: resourceNames.dojo,
+        image: `${resourceNames.registry}.azurecr.io/${resourceNames.dojo}:test`,
+        digest, imageId, scanHash: "f".repeat(64),
+      },
+      portal: {
+        repository: resourceNames.portal,
+        image: `${resourceNames.registry}.azurecr.io/${resourceNames.portal}:test`,
+        digest, imageId, scanHash: "f".repeat(64),
+      },
       ...(configuration.drowsyDragonEnabled
         ? {
             drowsyDragon: {
               ...common,
-              repository: drowsyDragon.id,
+              repository: resourceNames.drowsyDragon,
               baseImage: drowsyDragon.baseImage,
-              image: `${names(configuration).registry}.azurecr.io/drowsy-dragon:test`,
+              image: `${resourceNames.registry}.azurecr.io/${resourceNames.drowsyDragon}:test`,
               dockerfileHash: "f".repeat(64),
             },
           }
@@ -153,9 +162,9 @@ function releaseFixture(configuration) {
         ? {
             nginxProxy: {
               ...common,
-              repository: nginxProxy.id,
+              repository: resourceNames.nginxProxy,
               mode: nginxMode(configuration.nginxProxyMode).mode,
-              image: `${names(configuration).registry}.azurecr.io/nginx-proxy:test`,
+              image: `${resourceNames.registry}.azurecr.io/${resourceNames.nginxProxy}:test`,
               sourceLockPath: "source-lock.json",
               sourceLockHash: receipt.hashes.sourceLock,
               sourceSnapshotHash: nginxProxy.source.sha256,
@@ -277,6 +286,32 @@ test("all optional-image combinations coexist without changing the default two-i
   );
 });
 
+test("all release images must match their app repository, registry and tag", () => {
+  const selected = { ...base, drowsyDragonEnabled: true, nginxProxyEnabled: true };
+  const resourceNames = names(selected);
+  const release = releaseFixture(selected);
+  validateRelease(selected, release);
+  for (const [key, legacy] of Object.entries({
+    dojo: "dojo", portal: "control-portal",
+    drowsyDragon: "drowsy-dragon", nginxProxy: "nginx-proxy",
+  })) {
+    const expected = release.images[key];
+    assert.equal(expected.repository, resourceNames[key]);
+    for (const entry of [
+      { ...expected, repository: legacy },
+      { ...expected, image: `${resourceNames.registry}.azurecr.io/${legacy}:test` },
+      { ...expected, image: `other.azurecr.io/${resourceNames[key]}:test` },
+      { ...expected, image: `${expected.image}/extra` },
+      { ...expected, image: `${resourceNames.registry}.azurecr.io/${resourceNames[key]}:` },
+      { ...expected, image: undefined },
+    ]) {
+      const changed = structuredClone(release);
+      changed.images[key] = entry;
+      assert.throws(() => validateRelease(selected, changed), /deployed app name/);
+    }
+  }
+});
+
 test("both optional demos can be planned offline without tools or Azure writes", async () => {
   const temp = await mkdtemp(join(tmpdir(), "dojo-nginx-plan-"));
   try {
@@ -376,11 +411,17 @@ test("both build modes preserve upstream source and capture isolated inventory/f
           );
         return "";
       };
+      const repository = mode === "vulnerable" ? names(config).nginxProxy : nginxProxy.id;
       const entry = await buildNginxProxy(
-        `nginx-proxy:${mode}`,
+        `${repository}:${mode}`,
         join(temp, mode),
         mode,
-        { execute },
+        { execute, repository },
+      );
+      assert.equal(entry.repository, repository);
+      assert.equal(
+        JSON.parse(await readFile(join(temp, mode, "local-image.json"), "utf8")).repository,
+        repository,
       );
       const build = calls.find(
         ([command, args]) => command === "docker" && args[0] === "build",
@@ -542,7 +583,7 @@ function cloudFixture(configuration = config) {
       if (path.startsWith(`${target}/config/web`))
         return {
           properties: {
-            linuxFxVersion: `DOCKER|${resourceNames.registry}.azurecr.io/nginx-proxy@${digest}`,
+            linuxFxVersion: `DOCKER|${resourceNames.registry}.azurecr.io/${resourceNames.nginxProxy}@${digest}`,
           },
         };
       if (path.includes("/pricings/")) {
@@ -601,11 +642,28 @@ test("collector keeps deployment, startup measurements, target-CVE scans and sco
       report.alerts.map((item) => item.id),
       ["nginx-alert"],
     );
-    assert.match(report.release.nginxProxyObservedImage, /nginx-proxy@sha256:/);
+    assert.match(report.release.nginxProxyObservedImage, /-proxy@sha256:/);
     assert.match(reportHtml(report), /NGINX Proxy/);
     assert.match(reportHtml(report), /CVE-2026-42533/);
     assert.equal(report.nginxProxy.artifacts, undefined);
   }
+});
+
+test("legacy NGINX repository names are deployment gaps even with the expected digest", async () => {
+  const fixture = cloudFixture();
+  const request = fixture.client.request;
+  fixture.client.request = async (path, options) => {
+    const result = await request(path, options);
+    if (path.includes(`${names(config).nginxProxy}/config/web`))
+      result.properties.linuxFxVersion =
+        `DOCKER|${names(config).registry}.azurecr.io/nginx-proxy@${digest}`;
+    return result;
+  };
+  const report = await collectReport(config, fixture.client, [], new MemoryEvidenceStore(), {
+    fetcher: async () => Response.json(runtimeFixture()),
+  });
+  assert.equal(report.nginxProxy.state, "gap");
+  assert.equal(report.nginxProxy.scanState, "pending");
 });
 
 test("missing scans, failed private access, legacy fallbacks and receipt drift never become success", async () => {

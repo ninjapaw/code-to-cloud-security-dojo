@@ -59,7 +59,7 @@ module dojo 'modules/app.bicep' = {
     name: dojoName
     location: location
     labId: labId
-    image: '${registry.properties.loginServer}/dojo@${dojoDigest}'
+    image: '${registry.properties.loginServer}/${dojoName}@${dojoDigest}'
     publicAccess: dojoPublicAccess
     restrictToAdminIp: dojoRestrictToAdminIp
     adminIpv4Address: adminIpv4Address
@@ -83,7 +83,7 @@ module portal 'modules/app.bicep' = {
     name: portalName
     location: location
     labId: labId
-    image: '${registry.properties.loginServer}/control-portal@${portalDigest}'
+    image: '${registry.properties.loginServer}/${portalName}@${portalDigest}'
     publicAccess: true
     restrictToAdminIp: true
     adminIpv4Address: adminIpv4Address
@@ -124,7 +124,7 @@ module nginxProxy 'modules/app.bicep' = if (nginxProxyEnabled) {
     name: nginxProxyName
     location: location
     labId: labId
-    image: '${registry.properties.loginServer}/nginx-proxy@${nginxProxyDigest}'
+    image: '${registry.properties.loginServer}/${nginxProxyName}@${nginxProxyDigest}'
     publicAccess: false
     adminIpv4Address: adminIpv4Address
     workspaceId: workspace.id
