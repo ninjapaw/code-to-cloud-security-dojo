@@ -155,6 +155,31 @@ build run; deploy consumes the same run and requires the exact token printed by
 what-if. It runs only from `dev`, never uses client secrets, and does not automate
 cleanup, credential rotation, GitHub connector consent, or plan downgrades.
 
+Optional-image selection comes from committed defaults and protected GitHub
+environment variables; the workflow does not force the demos off:
+
+| Protected environment variable | Effect when set |
+| --- | --- |
+| `DOJO_DROWSY_DRAGON_ENABLED` | `true` or `false`: include/exclude the sleeping ACI image. |
+| `DOJO_NGINX_PROXY_ENABLED` | `true` or `false`: include/exclude the private NGINX image. |
+| `DOJO_NGINX_PROXY_MODE` | `vulnerable` or `remediated`: select the reviewed NGINX package/configuration. |
+| `DOJO_EVIDENCE_PUBLIC_ACCESS` | `false` keeps Blob evidence private during provisioning. |
+| `DOJO_VIA_PORTAL` | `true` uses the authenticated private-evidence path for deploy, verify and report. |
+
+Set both image flags to `true` for the complete four-application release.
+Unset configuration variables preserve committed defaults, which keep optional
+demos off. Keep the values unchanged across build, what-if and deploy: changing
+them invalidates the configuration-bound release. NGINX must be provisioned
+before its first release, and optional-image deployments require `accept-costs`.
+The OIDC setup registers `Microsoft.ContainerInstance` for Dragon; `provision`
+verifies registration rather than silently registering providers.
+
+`DOJO_VIA_PORTAL` defaults to `false`. A runner using it must reach the portal
+from an authorized IP/private path and read its credentials from Key Vault.
+Setting it does not allowlist a public GitHub-hosted runner or change network
+rules. DHI image access must be available on the selected runner; this workflow
+does not copy credentials from the separate validation environment.
+
 The optional Drowsy Dragon CI job is manually enabled and needs DHI pull
 credentials, not Azure credentials. Store them only in a protected
 `drowsy-dragon-images` environment restricted to `dev`, not as repository-wide
@@ -399,6 +424,26 @@ pushing either. Portal HIGH/CRITICAL findings fail the build. Intentional Dojo
 findings still require review and must be distinguished from scanner failures.
 Source labels, tree/content hashes and scan hashes accompany immutable ACR digests
 in the ignored release manifest. A changed configuration invalidates that manifest.
+
+#### Dockerfile and Deployment Inventory
+
+| Recipe | Deployment use |
+| --- | --- |
+| [Control portal](apps/control-portal/Dockerfile) | Pinned non-root Node runtime, port 8080, digest-pinned App Service. Its dependency stage is not deployed separately. |
+| [WebGoat runtime](apps/dojo/upstream/Dockerfile) | Input to the [owned recipe generator](scripts/lib/dojo-source.mjs), which pins Java 25, builds the JAR, and produces the Dojo image for App Service on port 8080. |
+| [Drowsy Dragon](apps/drowsy-dragon/Dockerfile) | Pinned SDK image with `sleep infinity`, deployed to no-ingress ACI when enabled; it has no HTTP health endpoint. |
+| [NGINX Proxy](apps/nginx-proxy/upstream/Dockerfile) | Original reviewed training recipe; App Service routes and probes port 80 through NGINX to its Node dashboard on port 3000. Deployed privately when enabled. |
+| [Credential utility](scripts/Dockerfile.secret-bootstrap) | Scanned ACR image run only for private credential bootstrap, then its temporary site/identity/grants are removed. |
+| [Upstream desktop example](apps/dojo/upstream/Dockerfile_desktop) | Preserved WebGoat desktop/ZAP example, not an Azure workload and not part of the release. |
+
+Every enabled application image must finish scanning before any push. The release
+validates ACR manifest digests before deployment. Upstream NGINX and WebGoat
+recipes remain unmodified imports; their source-lock checks fail on unreviewed
+changes. The original NGINX Docker healthcheck probes Node's port 3000, while the
+Azure health probe explicitly tests NGINX's port 80 and its forwarded `/health`.
+NGINX's training package version and upstream tag-based Ubuntu/Node dependencies
+are not a production-hardening claim; the actual released image is pinned in ACR.
+
 When Drowsy Dragon is enabled, the same build includes its pinned SDK image,
 package inventory and complete Trivy scan. A release refuses missing or
 tampered demo evidence; all enabled images must finish scanning before any push.

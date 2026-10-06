@@ -93,6 +93,10 @@ node scripts/deploy.mjs report
 All enabled images must finish scanning before any push. Portal HIGH/CRITICAL
 findings still block the release; training-image findings are preserved for
 explicit review. Configuration or mode changes invalidate old release manifests.
+For the manual GitHub deployment workflow, set the protected environment's
+`DOJO_NGINX_PROXY_ENABLED=true` and `DOJO_NGINX_PROXY_MODE` consistently across
+build, what-if and deploy. The workflow preserves these choices instead of
+forcing NGINX off; leave Drowsy Dragon enabled too for a four-application release.
 For a workstation without private Blob connectivity, use `deploy --via-portal`
 and `verify --via-portal` with the root
 [private publication workflow](../../README.md#publish-and-verify-through-the-private-portal-connection).

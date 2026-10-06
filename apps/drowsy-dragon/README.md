@@ -73,8 +73,9 @@ This is one property of the existing configuration, not a replacement file.
 The committed default is `false`; older local configurations without this
 property retain the two-image WebGoat/portal behavior.
 
-Run the approved `provision` action after enabling the option so the
-`Microsoft.ContainerInstance` provider is registered. Provision does not start
+Run the approved `setup:github-oidc -- --apply` bootstrap to register required
+providers, including `Microsoft.ContainerInstance`, then run `provision` after
+enabling the option. Provision checks provider registration and does not start
 the dragon. Commit reviewed source changes before an environment release build;
 the lifecycle refuses dirty releases and never creates commits for you.
 

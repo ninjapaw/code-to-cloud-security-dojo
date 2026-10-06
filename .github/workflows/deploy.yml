@@ -21,7 +21,7 @@ on:
         type: string
         required: true
       accept-costs:
-        description: Accept recurring charges (required for provision and protection)
+        description: Accept recurring charges (required for provision, protection and optional-image deployments)
         type: boolean
         default: false
       release-run-id:
@@ -57,6 +57,11 @@ jobs:
       DOJO_LOCATION: ${{ vars.DOJO_LOCATION }}
       DOJO_OPERATOR_OBJECT_ID: ${{ vars.DOJO_OPERATOR_OBJECT_ID }}
       DOJO_ADMIN_CIDR: ${{ vars.DOJO_ADMIN_CIDR }}
+      DOJO_DROWSY_DRAGON_ENABLED: ${{ vars.DOJO_DROWSY_DRAGON_ENABLED }}
+      DOJO_NGINX_PROXY_ENABLED: ${{ vars.DOJO_NGINX_PROXY_ENABLED }}
+      DOJO_NGINX_PROXY_MODE: ${{ vars.DOJO_NGINX_PROXY_MODE }}
+      DOJO_EVIDENCE_PUBLIC_ACCESS: ${{ vars.DOJO_EVIDENCE_PUBLIC_ACCESS }}
+      DOJO_VIA_PORTAL: ${{ vars.DOJO_VIA_PORTAL }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -97,23 +102,7 @@ jobs:
           fi
           config_path="$RUNNER_TEMP/dojo-deploy.json"
           echo "DOJO_CONFIG=$config_path" >> "$GITHUB_ENV"
-          jq \
-            --arg tenantId "$DOJO_TENANT_ID" \
-            --arg subscriptionId "$DOJO_SUBSCRIPTION_ID" \
-            --arg resourceGroup "$DOJO_RESOURCE_GROUP" \
-            --arg location "$DOJO_LOCATION" \
-            --arg operatorObjectId "$DOJO_OPERATOR_OBJECT_ID" \
-            --arg adminCidr "$DOJO_ADMIN_CIDR" \
-            '.tenantId = $tenantId
-              | .subscriptionId = $subscriptionId
-              | .resourceGroup = $resourceGroup
-              | .location = $location
-              | .operatorObjectId = $operatorObjectId
-              | .adminCidr = $adminCidr
-              | .drowsyDragonEnabled = false
-              | .nginxProxyEnabled = false' \
-            config/deploy.config.json > "$config_path"
-          chmod 600 "$config_path"
+          node scripts/workflow-config.mjs "$config_path"
           DOJO_CONFIG="$config_path" node scripts/deploy.mjs plan > /dev/null
       - name: Sign in to Azure with GitHub OIDC
         uses: azure/login@eec3c95657c1536435858eda1f3ff5437fee8474 # v2.3.0
@@ -177,9 +166,18 @@ jobs:
           RELEASE_CONFIRMATION: ${{ inputs.release-confirmation }}
         run: |
           set -euo pipefail
+          portal_args=()
+          case "${DOJO_VIA_PORTAL:-false}" in
+            true) portal_args+=(--via-portal) ;;
+            false) ;;
+            *) echo "DOJO_VIA_PORTAL must be true or false" >&2; exit 1 ;;
+          esac
           case "$OPERATION" in
-            doctor|verify|report)
+            doctor)
               node scripts/deploy.mjs "$OPERATION"
+              ;;
+            verify|report)
+              node scripts/deploy.mjs "$OPERATION" "${portal_args[@]}"
               ;;
             provision|protection)
               node scripts/deploy.mjs "$OPERATION" \
@@ -203,6 +201,7 @@ jobs:
                 --confirm "$RELEASE_CONFIRMATION" \
               )
               if [[ "$ACCEPT_COSTS" == "true" ]]; then deploy_args+=(--accept-costs); fi
+              deploy_args+=("${portal_args[@]}")
               node scripts/deploy.mjs deploy "${deploy_args[@]}"
               ;;
           esac

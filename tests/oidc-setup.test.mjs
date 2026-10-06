@@ -32,6 +32,7 @@ test("bootstrap is dry-run by default and delegates only required scopes", async
   assert.match(source, /defenderReaderRole/);
   assert.match(source, /defenderOperatorRole/);
   assert.match(source, /AZURE_PROTECTION_CLIENT_ID/);
+  assert.match(source, /const providers = \[[\s\S]*?"Microsoft\.ContainerInstance"/);
   assert.match(
     source,
     /RoleDefinitionId\] ForAnyOfAnyValues:GuidEquals \{\$\{groupAssignableRoles\}\}/,

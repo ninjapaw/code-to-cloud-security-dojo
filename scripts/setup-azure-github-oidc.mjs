@@ -63,6 +63,7 @@ const providers = [
   "Microsoft.Web",
   "Microsoft.Network",
   "Microsoft.ContainerRegistry",
+  "Microsoft.ContainerInstance",
   "Microsoft.KeyVault",
   "Microsoft.Storage",
   "Microsoft.OperationalInsights",
