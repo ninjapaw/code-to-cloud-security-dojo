@@ -10,7 +10,7 @@ export const drowsyDragon = Object.freeze({
   id: "drowsy-dragon",
   title: "Drowsy Dragon",
   baseImage:
-    "dhi.io/dotnet:8-sdk@sha256:a04b53a72db39c248b8947109d1cce6718a7449b7828d85bdb1b8e1cc4e1b6ef",
+    "dhi.io/dotnet:8-sdk@sha256:238ae2cade2e61c0615dfdd416ff1857a343321e9e89de3b656b6f5c24ace8e8",
   packages: Object.freeze(["libc6", "libc-bin", "tar", "libgcrypt20"]),
   platform: "linux/amd64",
 });

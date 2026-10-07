@@ -1,4 +1,4 @@
-FROM dhi.io/dotnet:8-sdk@sha256:a04b53a72db39c248b8947109d1cce6718a7449b7828d85bdb1b8e1cc4e1b6ef
+FROM dhi.io/dotnet:8-sdk@sha256:238ae2cade2e61c0615dfdd416ff1857a343321e9e89de3b656b6f5c24ace8e8
 
 RUN dpkg-query -W libc6 libc-bin tar libgcrypt20
 

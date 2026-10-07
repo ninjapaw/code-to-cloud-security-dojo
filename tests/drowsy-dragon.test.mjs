@@ -146,11 +146,15 @@ test("recipe preserves the supplied digest, inventory command and sleeping entry
     "utf8",
   );
   assert.equal(recipe.replace(/\r\n/g, "\n"), drowsyDragonRecipe);
-  assert.match(
-    recipe,
-    /@sha256:a04b53a72db39c248b8947109d1cce6718a7449b7828d85bdb1b8e1cc4e1b6ef/,
+  assert.equal(
+    drowsyDragon.baseImage,
+    "dhi.io/dotnet:8-sdk@sha256:238ae2cade2e61c0615dfdd416ff1857a343321e9e89de3b656b6f5c24ace8e8",
   );
   assert.equal(drowsyDragon.platform, "linux/amd64");
+  const documentation = await readFile(
+    new URL("../apps/drowsy-dragon/README.md", import.meta.url), "utf8",
+  );
+  assert.ok(documentation.replace(/\r\n/g, "\n").includes(drowsyDragonRecipe));
 });
 
 test("demo is opt-in with strict booleans and backward-compatible missing configuration", () => {
@@ -252,6 +256,25 @@ test("receipt binds the deployed digest, scan hash, original artifacts and appro
   assert.throws(
     () => summarizeDragonReceipt(changed, digest, receipt.hashes.scanJson),
     /approved base and commands/,
+  );
+});
+
+test("previous base-image releases and receipts cannot be reused for the new pin", () => {
+  const previousBase =
+    "dhi.io/dotnet:8-sdk@sha256:a04b53a72db39c248b8947109d1cce6718a7449b7828d85bdb1b8e1cc4e1b6ef";
+  const release = releaseFixture(config);
+  release.images.drowsyDragon.baseImage = previousBase;
+  assert.throws(() => validateRelease(config, release), /pinned provenance/);
+
+  const receipt = receiptFixture();
+  receipt.baseImage = previousBase;
+  receipt.artifacts.dockerfile = drowsyDragonRecipe.replace(
+    drowsyDragon.baseImage, previousBase,
+  );
+  receipt.hashes.dockerfile = sha256(receipt.artifacts.dockerfile);
+  assert.throws(
+    () => summarizeDragonReceipt(receipt, digest, receipt.hashes.scanJson),
+    /deployed release/,
   );
 });
 

@@ -8,7 +8,7 @@ at build time, then sleeps indefinitely. It does **not** compile or serve a .NET
 application, expose HTTP, or run an exploit.
 
 ```dockerfile
-FROM dhi.io/dotnet:8-sdk@sha256:a04b53a72db39c248b8947109d1cce6718a7449b7828d85bdb1b8e1cc4e1b6ef
+FROM dhi.io/dotnet:8-sdk@sha256:238ae2cade2e61c0615dfdd416ff1857a343321e9e89de3b656b6f5c24ace8e8
 
 RUN dpkg-query -W libc6 libc-bin tar libgcrypt20
 
@@ -18,6 +18,11 @@ CMD ["sleep", "infinity"]
 The executable [Dockerfile](Dockerfile) and
 [approved demo metadata](../../shared/drowsy-dragon.mjs) must agree. Builds fail
 if the base pin or commands drift. Images are built for `linux/amd64`.
+
+The selected [Docker Hub image](https://hub.docker.com/hardened-images/catalog/dhi/dotnet/images/dotnet%2Fdebian-13%2F8-sdk/sha256-238ae2cade2e61c0615dfdd416ff1857a343321e9e89de3b656b6f5c24ace8e8)
+contains .NET SDK **8.0.425** on **Debian 13 (trixie)**. The digest, not the
+moving `8-sdk` tag, selects the exact image. A release built with the previous
+base digest must be rebuilt and rescanned; its evidence is not valid for this pin.
 
 ## What this demonstrates
 
