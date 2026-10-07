@@ -128,3 +128,58 @@ test("deployment workflow forwards protected feature choices and the private por
   assert.match(workflow, /deploy_args\+=\("\$\{portal_args\[@\]\}"\)/);
   assert.match(workflow, /if \[\[ "\$ACCEPT_COSTS" == "true" \]\]; then deploy_args\+=\(--accept-costs\)/);
 });
+
+test("release image artifacts are scan-bound and separate from deployment evidence", async () => {
+  const workflow = await readFile(
+    new URL("../.github/workflows/deploy.yml", import.meta.url), "utf8",
+  );
+  assert.match(workflow, /name: dojo-container-images-\$\{\{ github\.run_id \}\}/);
+  assert.match(workflow, /name: dojo-release-\$\{\{ github\.run_id \}\}/);
+  assert.match(workflow, /expectedImageId: entry\.imageId/);
+  for (const recipe of [
+    "output/code-to-cloud-training/Dojo.Dockerfile",
+    "apps/control-portal/Dockerfile", "apps/drowsy-dragon/Dockerfile",
+    "apps/nginx-proxy/upstream/Dockerfile",
+  ])
+    assert.ok(workflow.includes(recipe), recipe);
+  assert.match(workflow, /path: output\/container-images\/\r?\n\s+if-no-files-found: error\r?\n\s+compression-level: 1\r?\n\s+retention-days: 7/);
+  assert.match(workflow, /runs-on: \$\{\{ fromJSON\(vars\.DOJO_DEPLOY_RUNNER_LABELS/);
+  assert.match(workflow, /runner cannot reach the protected portal/);
+  assert.doesNotMatch(workflow, /az webapp config access-restriction add/);
+  assert.ok(workflow.indexOf("name: Upload the app-named container images") <
+    workflow.indexOf("name: Record build workflow provenance"));
+});
+
+test("validation exports all image recipes without Azure credentials or deploying CI images", async () => {
+  const workflow = await readFile(
+    new URL("../.github/workflows/dojo.yml", import.meta.url), "utf8",
+  );
+  for (const name of [
+    "nginx-proxy-${{ matrix.mode }}-container", "drowsy-dragon-container",
+    "webgoat-and-portal-containers",
+  ])
+    assert.ok(workflow.includes(`name: ${name}`), name);
+  for (const recipe of [
+    "apps/nginx-proxy/upstream/Dockerfile", "apps/drowsy-dragon/Dockerfile",
+    "apps/control-portal/Dockerfile", "Dojo.Dockerfile",
+  ])
+    assert.ok(workflow.includes(recipe), recipe);
+  assert.ok(workflow.indexOf("name: Export WebGoat and portal images") >
+    workflow.indexOf("name: Gate portal high and critical vulnerabilities"));
+  assert.doesNotMatch(workflow, /azure\/login|id-token: write|docker push|scripts\/deploy\.mjs deploy/);
+});
+
+test("DHI access uses environment secrets only when supplied and always verifies the pinned pull", async () => {
+  for (const name of ["deploy", "dojo"]) {
+    const workflow = await readFile(
+      new URL(`../.github/workflows/${name}.yml`, import.meta.url), "utf8",
+    );
+    assert.match(workflow, /DHI_USERNAME: \$\{\{ secrets\.DHI_USERNAME \}\}/);
+    assert.match(workflow, /DHI_TOKEN: \$\{\{ secrets\.DHI_TOKEN \}\}/);
+    assert.match(workflow, /if \[\[ -n "\$DHI_USERNAME" \|\| -n "\$DHI_TOKEN" \]\]/);
+    assert.match(workflow, /docker login dhi\.io --username "\$DHI_USERNAME" --password-stdin/);
+    assert.match(workflow, /docker pull --platform linux\/amd64 "\$base_image"/);
+    assert.match(workflow, /if: always\(\) && steps\.dhi-login\.outputs\.authenticated == 'true'/);
+    assert.doesNotMatch(workflow, /docker login.*--password /);
+  }
+});

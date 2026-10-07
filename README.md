@@ -181,6 +181,14 @@ environment variables; the workflow does not force the demos off:
 | `DOJO_EVIDENCE_PUBLIC_ACCESS` | `false` keeps Blob evidence private during provisioning. |
 | `DOJO_VIA_PORTAL` | `true` uses the authenticated private-evidence path for deploy, verify and report. |
 
+The repository variable `DOJO_DEPLOY_RUNNER_LABELS` optionally selects a trusted
+Linux runner as a JSON array of labels, for example
+`["self-hosted","linux","x64","dojo-training"]`. It is repository-scoped because
+runner selection happens before environment variables are available. If unset,
+the deployment workflow uses `ubuntu-latest`. Provision a suitable runner through
+your normal administration process; the workflow does not register one or widen
+firewalls. Keep untrusted pull-request jobs off a privileged deployment runner.
+
 Set both image flags to `true` for the complete four-application release.
 Unset configuration variables preserve committed defaults, which keep optional
 demos off. Keep the values unchanged across build, what-if and deploy: changing
@@ -192,11 +200,17 @@ verifies registration rather than silently registering providers.
 `DOJO_VIA_PORTAL` defaults to `false`. A runner using it must reach the portal
 from an authorized IP/private path and read its credentials from Key Vault.
 Setting it does not allowlist a public GitHub-hosted runner or change network
-rules. DHI image access must be available on the selected runner; this workflow
-does not copy credentials from the separate validation environment.
+rules. Deployment, verify and report check portal reachability before attempting
+the authenticated private-evidence path. DHI image access must be available on
+the selected runner. Public access to the exact pinned image is checked when no
+DHI credentials are configured. If the registry requires authentication, set both
+`DHI_USERNAME` and `DHI_TOKEN` in `code-to-cloud-training` for release builds;
+credentials are passed through stdin and removed from Docker after use. The
+workflow never copies credentials from another environment or a workstation.
 
-The optional Drowsy Dragon CI job is manually enabled and needs DHI pull
-credentials, not Azure credentials. Store them only in a protected
+The optional Drowsy Dragon CI job is manually enabled and needs access to its
+pinned DHI image, not Azure credentials. If authenticated access is needed,
+store DHI pull credentials only in the protected
 `drowsy-dragon-images` environment restricted to `dev`, not as repository-wide
 secrets. The job retains all-severity Trivy JSON/SARIF and package inventory
 without inventing an expected CVE list. Its portal/report tracking keeps Trivy
@@ -205,6 +219,46 @@ The independent NGINX CI job builds/scans both affected and target-CVE remediate
 modes on pushes and pull requests. Drowsy Dragon remains manual because it needs
 DHI credentials. Both optional demos use the same package/scan evidence helpers,
 and may be enabled together for a four-image release including the admin portal.
+
+### GitHub Image Artifacts
+
+Both workflows build from the repository's Dockerfiles, including the generated,
+source-verified WebGoat `Dojo.Dockerfile`. Successful scan-gated builds also
+publish downloadable artifacts containing `image.tar`, the exact `Dockerfile`,
+`image.json` (image reference, image ID, platform, export revision and hashes),
+and `SHA256SUMS`. The exporter rejects an image that changed since scanning and
+removes partial exports on failure.
+
+| Workflow | Container artifact |
+| --- | --- |
+| Validation | `webgoat-and-portal-containers` |
+| Validation | `nginx-proxy-vulnerable-container`, `nginx-proxy-remediated-container` |
+| Validation, optional protected job | `drowsy-dragon-container` |
+| Deployment, `build` operation | `dojo-container-images-<run-id>`, grouped by each Azure app name |
+
+Image archives are retained for seven days to bound storage costs. Release
+manifests, provenance and scan evidence remain in `dojo-release-<run-id>` for
+90 days; preview and deployment download that smaller artifact, not image tar
+files. ACR remains the deployment registry and runtime references stay
+digest-pinned. Validation artifacts are local scan builds, not approved releases.
+After downloading and extracting a container artifact, verify `SHA256SUMS` and
+load the image with `docker image load --input image.tar` from its directory.
+Do not run deliberately vulnerable images outside an isolated training host.
+
+For all four images, enable both protected feature flags above, then:
+
+1. Run validation on `dev` with both optional-image inputs enabled and review its
+   tests, scans and container artifacts.
+2. Dispatch the deployment workflow with `operation=build` and the exact resource
+   group confirmation. A different authorized reviewer must approve it.
+3. After success, dispatch `what-if` on that same commit with the build run ID.
+   Review its actual infrastructure changes and printed deployment token.
+4. Dispatch `deploy` with the same build run ID, the exact token, and explicit
+   optional-image cost consent. Use an authorized runner for private evidence.
+5. Dispatch `verify` and check live digests, HTTP health and private receipts.
+
+The workflow does not auto-approve itself or bypass the state-bound deployment
+confirmation. A pending environment review is not a successful build or release.
 
 Defender GitHub consent, repository discovery, native GitHub security features and
 agentless scanner eligibility are separate prerequisites. Connect this repository

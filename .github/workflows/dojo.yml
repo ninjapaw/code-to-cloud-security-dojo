@@ -47,6 +47,22 @@ jobs:
         env:
           NGINX_MODE: ${{ matrix.mode }}
         run: npm run image:build:nginx -- --mode "$NGINX_MODE"
+      - name: Export the NGINX image and its Dockerfile
+        env:
+          NGINX_MODE: ${{ matrix.mode }}
+        run: |
+          node scripts/export-image-artifact.mjs \
+            --image "nginx-proxy:$NGINX_MODE" \
+            --dockerfile apps/nginx-proxy/upstream/Dockerfile \
+            --output "output/container-images/nginx-proxy-$NGINX_MODE"
+      - name: Upload the NGINX container image
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: nginx-proxy-${{ matrix.mode }}-container
+          path: output/container-images/nginx-proxy-${{ matrix.mode }}/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 7
       - name: Retain NGINX source, package and scan evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -73,18 +89,39 @@ jobs:
       - uses: aquasecurity/setup-trivy@e6c2c5e321ed9123bda567646e2f96565e34abe1 # v0.2.4
         with:
           version: v0.74.0
-      - name: Sign in to the DHI source registry
+      - name: Check access to the pinned DHI source image
         id: dhi-login
         env:
           DHI_USERNAME: ${{ secrets.DHI_USERNAME }}
           DHI_TOKEN: ${{ secrets.DHI_TOKEN }}
         run: |
           set -euo pipefail
-          : "${DHI_USERNAME:?Set the DHI_USERNAME repository secret}"
-          : "${DHI_TOKEN:?Set the DHI_TOKEN repository secret}"
-          printf '%s' "$DHI_TOKEN" | docker login dhi.io --username "$DHI_USERNAME" --password-stdin
+          if [[ -n "$DHI_USERNAME" || -n "$DHI_TOKEN" ]]; then
+            : "${DHI_USERNAME:?Set both DHI credentials in the drowsy-dragon-images environment}"
+            : "${DHI_TOKEN:?Set both DHI credentials in the drowsy-dragon-images environment}"
+            printf '%s' "$DHI_TOKEN" | docker login dhi.io --username "$DHI_USERNAME" --password-stdin
+            echo "authenticated=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No DHI credentials configured; checking public access to the pinned image."
+          fi
+          base_image="$(node --input-type=module -e 'import { drowsyDragon } from "./shared/drowsy-dragon.mjs"; console.log(drowsyDragon.baseImage)')"
+          docker pull --platform linux/amd64 "$base_image"
       - name: Build and record package and vulnerability evidence
         run: npm run image:build:dragon -- --tag drowsy-dragon:scan
+      - name: Export Drowsy Dragon and its Dockerfile
+        run: |
+          node scripts/export-image-artifact.mjs \
+            --image drowsy-dragon:scan \
+            --dockerfile apps/drowsy-dragon/Dockerfile \
+            --output output/container-images/drowsy-dragon
+      - name: Upload the Drowsy Dragon container image
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: drowsy-dragon-container
+          path: output/container-images/drowsy-dragon/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 7
       - name: Retain Drowsy Dragon evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -92,7 +129,7 @@ jobs:
           name: drowsy-dragon-evidence
           path: output/images/drowsy-dragon/
       - name: Sign out of the source registry
-        if: always() && steps.dhi-login.outcome == 'success'
+        if: always() && steps.dhi-login.outputs.authenticated == 'true'
         run: docker logout dhi.io
 
   validate-and-scan:
@@ -147,7 +184,7 @@ jobs:
           trap 'docker rm --force "$container" > /dev/null 2>&1 || true' EXIT
           endpoint="$(docker port "$container" 8080/tcp)"
           port="${endpoint##*:}"
-          for attempt in $(seq 1 90); do
+          for _attempt in $(seq 1 90); do
             if curl --silent --show-error --fail --max-time 2 \
               "http://127.0.0.1:${port}/WebGoat/actuator/health" > /dev/null 2>&1; then
               break
@@ -169,6 +206,23 @@ jobs:
         run: trivy image --format sarif --output dojo-scan.sarif --exit-code 0 dojo:scan
       - name: Gate portal high and critical vulnerabilities
         run: trivy image --format sarif --output portal-scan.sarif --severity HIGH,CRITICAL --exit-code 1 dojo-portal:scan
+      - name: Export WebGoat and portal images with their Dockerfiles
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFile } from "node:fs/promises";
+          import { exportImageArtifact } from "./scripts/export-image-artifact.mjs";
+          const source = JSON.parse(await readFile("apps/dojo/source-lock.json", "utf8"));
+          await exportImageArtifact("dojo:scan", `output/images/${source.revision}/Dojo.Dockerfile`, "output/container-images/dojo");
+          await exportImageArtifact("dojo-portal:scan", "apps/control-portal/Dockerfile", "output/container-images/control-portal");
+          NODE
+      - name: Upload WebGoat and portal container images
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: webgoat-and-portal-containers
+          path: output/container-images/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 7
       - name: Retain image and browser evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

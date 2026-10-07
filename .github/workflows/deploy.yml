@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: Guarded lifecycle operation
+        description: Guarded lifecycle operation (build publishes Dockerfile images and artifacts)
         type: choice
         required: true
         options:
@@ -45,7 +45,7 @@ concurrency:
 jobs:
   lifecycle:
     if: github.ref == 'refs/heads/dev'
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.DOJO_DEPLOY_RUNNER_LABELS || '["ubuntu-latest"]') }}
     timeout-minutes: 90
     environment: code-to-cloud-training
     env:
@@ -75,6 +75,7 @@ jobs:
         with:
           version: v0.74.0
       - name: Validate target approval and create private configuration
+        id: configuration
         env:
           CONFIRM_RESOURCE_GROUP: ${{ inputs.confirm-resource-group }}
           OPERATION: ${{ inputs.operation }}
@@ -104,6 +105,36 @@ jobs:
           echo "DOJO_CONFIG=$config_path" >> "$GITHUB_ENV"
           node scripts/workflow-config.mjs "$config_path"
           DOJO_CONFIG="$config_path" node scripts/deploy.mjs plan > /dev/null
+          node --input-type=module <<'NODE' >> "$GITHUB_OUTPUT"
+          import { readFile } from "node:fs/promises";
+          const config = JSON.parse(await readFile(process.env.RUNNER_TEMP + "/dojo-deploy.json", "utf8"));
+          console.log(`drowsy-dragon=${config.drowsyDragonEnabled === true}`);
+          NODE
+      - name: Test Dockerfile build and release guardrails
+        if: inputs.operation == 'build'
+        run: |
+          npm test
+          npm run source:check
+          npm run image:check:nginx
+          npm run check:public
+      - name: Check access to the pinned DHI source image
+        if: inputs.operation == 'build' && steps.configuration.outputs.drowsy-dragon == 'true'
+        id: dhi-login
+        env:
+          DHI_USERNAME: ${{ secrets.DHI_USERNAME }}
+          DHI_TOKEN: ${{ secrets.DHI_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$DHI_USERNAME" || -n "$DHI_TOKEN" ]]; then
+            : "${DHI_USERNAME:?Set both DHI credentials in the code-to-cloud-training environment}"
+            : "${DHI_TOKEN:?Set both DHI credentials in the code-to-cloud-training environment}"
+            printf '%s' "$DHI_TOKEN" | docker login dhi.io --username "$DHI_USERNAME" --password-stdin
+            echo "authenticated=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No DHI credentials configured; checking public access to the pinned image."
+          fi
+          base_image="$(node --input-type=module -e 'import { drowsyDragon } from "./shared/drowsy-dragon.mjs"; console.log(drowsyDragon.baseImage)')"
+          docker pull --platform linux/amd64 "$base_image"
       - name: Sign in to Azure with GitHub OIDC
         uses: azure/login@eec3c95657c1536435858eda1f3ff5437fee8474 # v2.3.0
         with:
@@ -172,6 +203,13 @@ jobs:
             false) ;;
             *) echo "DOJO_VIA_PORTAL must be true or false" >&2; exit 1 ;;
           esac
+          if [[ "$DOJO_VIA_PORTAL" == "true" && ( "$OPERATION" == "deploy" || "$OPERATION" == "verify" || "$OPERATION" == "report" ) ]]; then
+            portal_url="$(node --input-type=module -e 'import { loadConfig, names } from "./shared/config.mjs"; console.log("https://" + names(await loadConfig()).portal + ".azurewebsites.net/health")')"
+            curl --silent --show-error --fail --max-time 30 "$portal_url" > /dev/null || {
+              echo "The runner cannot reach the protected portal. Configure repository variable DOJO_DEPLOY_RUNNER_LABELS for an authorized Linux runner; do not widen ingress." >&2
+              exit 1
+            }
+          fi
           case "$OPERATION" in
             doctor)
               node scripts/deploy.mjs "$OPERATION"
@@ -205,6 +243,34 @@ jobs:
               node scripts/deploy.mjs deploy "${deploy_args[@]}"
               ;;
           esac
+      - name: Export the scanned release images and Dockerfiles
+        if: success() && inputs.operation == 'build'
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFile } from "node:fs/promises";
+          import { exportImageArtifact } from "./scripts/export-image-artifact.mjs";
+          const release = JSON.parse(await readFile("output/code-to-cloud-training/release.json", "utf8"));
+          const recipes = {
+            dojo: "output/code-to-cloud-training/Dojo.Dockerfile",
+            portal: "apps/control-portal/Dockerfile",
+            drowsyDragon: "apps/drowsy-dragon/Dockerfile",
+            nginxProxy: "apps/nginx-proxy/upstream/Dockerfile",
+          };
+          for (const [key, entry] of Object.entries(release.images)) {
+            await exportImageArtifact(entry.image, recipes[key], `output/container-images/${entry.repository}`, {
+              expectedImageId: entry.imageId,
+            });
+          }
+          NODE
+      - name: Upload the app-named container images
+        if: success() && inputs.operation == 'build'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dojo-container-images-${{ github.run_id }}
+          path: output/container-images/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 7
       - name: Record build workflow provenance
         if: success() && inputs.operation == 'build'
         run: |
@@ -236,3 +302,6 @@ jobs:
             output/code-to-cloud-training/deployment-status.html
           if-no-files-found: ignore
           retention-days: 90
+      - name: Sign out of the source registry
+        if: always() && steps.dhi-login.outputs.authenticated == 'true'
+        run: docker logout dhi.io
