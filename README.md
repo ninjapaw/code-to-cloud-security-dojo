@@ -202,21 +202,26 @@ from an authorized IP/private path and read its credentials from Key Vault.
 Setting it does not allowlist a public GitHub-hosted runner or change network
 rules. Deployment, verify and report check portal reachability before attempting
 the authenticated private-evidence path. DHI image access must be available on
-the selected runner. Public access to the exact pinned image is checked when no
-DHI credentials are configured. If the registry requires authentication, set both
-`DHI_USERNAME` and `DHI_TOKEN` in `code-to-cloud-training` for release builds;
-credentials are passed through stdin and removed from Docker after use. The
-workflow never copies credentials from another environment or a workstation.
+the selected runner. Docker requires login to `dhi.io`, including for free
+Community images. Set organization secrets `DOCKER_USERNAME` and `DOCKER_TOKEN`
+(a read-capable Docker access token), and grant this repository access to both.
+The protected CI and release-build workflows use that pair automatically.
+Alternatively, a complete `DHI_USERNAME`/`DHI_TOKEN` pair in the applicable
+environment overrides the shared Docker credentials. A partial pair fails
+explicitly; usernames and tokens from different pairs are never combined.
+Credentials are passed through stdin and removed from Docker after use. The
+workflows never fetch credentials from a workstation or attempt anonymous pulls.
 
 The protected Drowsy Dragon CI job runs on pushes to `dev` and is enabled by
 default for manual runs on `dev`. Clear the `drowsy-dragon` checkbox to skip it
 for an individual manual run. Pull requests and other branches do not run this
 protected job. Environment approval still applies: a selected job may wait for
 review, but it is no longer skipped on ordinary `dev` pushes.
-It needs access to its pinned DHI image, not Azure credentials. If authenticated
-access is needed, store DHI pull credentials only in the protected
-`drowsy-dragon-images` environment restricted to `dev`, not as repository-wide
-secrets. The job retains all-severity Trivy JSON/SARIF and package inventory
+It needs authenticated access to its pinned DHI image, not Azure credentials.
+Shared organization secrets remain subject to their repository-access policy;
+use the protected `drowsy-dragon-images` environment for any DHI-specific
+credential override. Release builds use `code-to-cloud-training`. The job
+retains all-severity Trivy JSON/SARIF and package inventory
 without inventing an expected CVE list. Its portal/report tracking keeps Trivy
 evidence separate from Defender observations.
 The independent NGINX CI job builds/scans both affected and target-CVE remediated

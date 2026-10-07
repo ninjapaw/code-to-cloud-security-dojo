@@ -44,8 +44,9 @@ incomplete scans are not a clean result. Even an observed zero is only a snapsho
 ## Build and scan locally
 
 Requires the repository's Node/npm dependencies, a running Linux Docker engine
-and Trivy with `image --list-all-pkgs` and `convert` support (CI pins 0.69.3).
-Authenticate to `dhi.io` with an authorized Docker account if required:
+and Trivy with `image --list-all-pkgs` and `convert` support (CI pins 0.74.0).
+Authenticate to `dhi.io` with an authorized Docker account; even Community
+images require login:
 
 ```text
 docker login dhi.io
@@ -150,10 +151,15 @@ manual `dev` runs. Clear the `drowsy-dragon` checkbox to skip a particular manua
 run. Pull requests and other branches cannot run this protected job.
 
 The `drowsy-dragon-images` environment still requires approval; a pending review
-is different from a skipped job. If authenticated registry access is needed,
-configure both `DHI_USERNAME` and `DHI_TOKEN` in that environment for an account
-authorized to pull the pin. With neither secret configured, the job verifies
-public access to the exact pinned image. Incomplete credentials fail explicitly.
+is different from a skipped job. Configure organization secrets `DOCKER_USERNAME`
+and `DOCKER_TOKEN` and allow this repository to use both. Use a Docker access
+token authorized to pull the pin. The release build consumes the same secret
+names after its separate `code-to-cloud-training` approval.
+
+A complete `DHI_USERNAME`/`DHI_TOKEN` pair in the relevant environment overrides
+the organization Docker pair. Incomplete pairs fail explicitly rather than
+mixing credentials or trying an anonymous pull. A successful workstation pull
+does not establish that GitHub runners have registry access.
 The job signs out after authenticated use and retains `drowsy-dragon-evidence`
 plus the `drowsy-dragon-container` image/Dockerfile artifact. It has no Azure
 credentials or deployment step. Azure deployment remains separately approved.

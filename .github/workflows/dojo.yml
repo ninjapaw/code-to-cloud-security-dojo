@@ -94,16 +94,21 @@ jobs:
         env:
           DHI_USERNAME: ${{ secrets.DHI_USERNAME }}
           DHI_TOKEN: ${{ secrets.DHI_TOKEN }}
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
         run: |
           set -euo pipefail
           if [[ -n "$DHI_USERNAME" || -n "$DHI_TOKEN" ]]; then
             : "${DHI_USERNAME:?Set both DHI credentials in the drowsy-dragon-images environment}"
             : "${DHI_TOKEN:?Set both DHI credentials in the drowsy-dragon-images environment}"
-            printf '%s' "$DHI_TOKEN" | docker login dhi.io --username "$DHI_USERNAME" --password-stdin
-            echo "authenticated=true" >> "$GITHUB_OUTPUT"
           else
-            echo "No DHI credentials configured; checking public access to the pinned image."
+            : "${DOCKER_USERNAME:?Set DOCKER_USERNAME and DOCKER_TOKEN organization secrets and grant this repository access}"
+            : "${DOCKER_TOKEN:?Set DOCKER_USERNAME and DOCKER_TOKEN organization secrets and grant this repository access}"
+            DHI_USERNAME="$DOCKER_USERNAME"
+            DHI_TOKEN="$DOCKER_TOKEN"
           fi
+          printf '%s' "$DHI_TOKEN" | docker login dhi.io --username "$DHI_USERNAME" --password-stdin
+          echo "authenticated=true" >> "$GITHUB_OUTPUT"
           base_image="$(node --input-type=module -e 'import { drowsyDragon } from "./shared/drowsy-dragon.mjs"; console.log(drowsyDragon.baseImage)')"
           docker pull --platform linux/amd64 "$base_image"
       - name: Build and record package and vulnerability evidence

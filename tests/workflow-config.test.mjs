@@ -188,17 +188,26 @@ test("Drowsy Dragon is selected for dev pushes and defaults on for manual dev bu
   assert.match(job, /name: drowsy-dragon-container/);
 });
 
-test("DHI access uses environment secrets only when supplied and always verifies the pinned pull", async () => {
+test("DHI access accepts complete organization Docker credentials or complete DHI overrides", async () => {
   for (const name of ["deploy", "dojo"]) {
     const workflow = await readFile(
       new URL(`../.github/workflows/${name}.yml`, import.meta.url), "utf8",
     );
     assert.match(workflow, /DHI_USERNAME: \$\{\{ secrets\.DHI_USERNAME \}\}/);
     assert.match(workflow, /DHI_TOKEN: \$\{\{ secrets\.DHI_TOKEN \}\}/);
+    assert.match(workflow, /DOCKER_USERNAME: \$\{\{ secrets\.DOCKER_USERNAME \}\}/);
+    assert.match(workflow, /DOCKER_TOKEN: \$\{\{ secrets\.DOCKER_TOKEN \}\}/);
     assert.match(workflow, /if \[\[ -n "\$DHI_USERNAME" \|\| -n "\$DHI_TOKEN" \]\]/);
+    for (const variable of ["DHI_USERNAME", "DHI_TOKEN", "DOCKER_USERNAME", "DOCKER_TOKEN"])
+      assert.ok(workflow.includes(`: "\${${variable}:?`), `${name}: incomplete ${variable} must fail`);
+    assert.match(
+      workflow,
+      /DHI_USERNAME="\$DOCKER_USERNAME"\r?\n\s+DHI_TOKEN="\$DOCKER_TOKEN"\r?\n\s+fi\r?\n\s+printf '%s' "\$DHI_TOKEN" \| docker login/,
+    );
     assert.match(workflow, /docker login dhi\.io --username "\$DHI_USERNAME" --password-stdin/);
     assert.match(workflow, /docker pull --platform linux\/amd64 "\$base_image"/);
     assert.match(workflow, /if: always\(\) && steps\.dhi-login\.outputs\.authenticated == 'true'/);
     assert.doesNotMatch(workflow, /docker login.*--password /);
+    assert.doesNotMatch(workflow, /checking public access|secrets\.DHI_(USERNAME|TOKEN) \|\|/);
   }
 });
