@@ -156,8 +156,11 @@ and `DOCKER_TOKEN` and allow this repository to use both. Use a Docker access
 token authorized to pull the pin. The release build consumes the same secret
 names in the automatic `code-to-cloud-images` publishing environment. On `dev`
 pushes, the release workflow builds, scans and pushes the app-named image to ACR
-with its dedicated registry-only writer identity. Application rollout remains
-separately approved in `code-to-cloud-training`.
+with its dedicated registry-only writer identity. When
+[automatic dev rollout](../../README.md#automatic-dev-rollout) is explicitly
+enabled, a dependent job uses the separate `code-to-cloud-training` identity to
+update every enabled application, reconcile the ACI scan tag and verify the
+deployed digests and receipts. Otherwise application rollout remains manual.
 
 A complete `DHI_USERNAME`/`DHI_TOKEN` pair in the relevant environment overrides
 the organization Docker pair. Incomplete pairs fail explicitly rather than
@@ -165,7 +168,7 @@ mixing credentials or trying an anonymous pull. A successful workstation pull
 does not establish that GitHub runners have registry access.
 The job signs out after authenticated use and retains `drowsy-dragon-evidence`
 plus the `drowsy-dragon-container` image/Dockerfile artifact. It has no Azure
-credentials or deployment step. Azure deployment remains separately approved.
+credentials or deployment step. The separate release workflow owns Azure updates.
 
 ## Cleanup and limitations
 

@@ -5,7 +5,7 @@ import { parseArgs } from "node:util";
 import { isIP } from "node:net";
 import spawn from "cross-spawn";
 import { githubEnvironmentSubject } from "./github-oidc-subject.mjs";
-import { names } from "../shared/config.mjs";
+import { names, booleanSetting } from "../shared/config.mjs";
 
 const { values } = parseArgs({
   options: {
@@ -145,12 +145,15 @@ function validateInputs() {
 }
 
 function ensureEnvironment(repository) {
+  const automaticRollout = booleanSetting(
+    getVariable("DOJO_AUTOMATIC_ROLLOUT"), "DOJO_AUTOMATIC_ROLLOUT",
+  );
   const reviewerId =
     values["reviewer-id"] || gh(["api", "user", "--jq", ".id"]);
   const body = {
     wait_timer: 0,
-    prevent_self_review: true,
-    reviewers: [{ type: "User", id: Number(reviewerId) }],
+    prevent_self_review: !automaticRollout,
+    reviewers: automaticRollout ? [] : [{ type: "User", id: Number(reviewerId) }],
     deployment_branch_policy: {
       protected_branches: false,
       custom_branch_policies: true,
@@ -170,8 +173,9 @@ function ensureEnvironment(repository) {
   if (
     current?.deployment_branch_policy?.custom_branch_policies === true &&
     current?.deployment_branch_policy?.protected_branches === false &&
-    reviewerRule?.prevent_self_review === true &&
-    currentReviewers?.includes(Number(reviewerId))
+    (automaticRollout
+      ? !reviewerRule && !current.protection_rules.some((rule) => rule.type === "wait_timer")
+      : reviewerRule?.prevent_self_review === true && currentReviewers?.includes(Number(reviewerId)))
   )
     status("ok", `GitHub environment ${values.environment} is protected`);
   else

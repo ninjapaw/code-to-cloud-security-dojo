@@ -120,11 +120,13 @@ vulnerabilities fail the release build.
 The separate [publishing and deployment workflow](.github/workflows/deploy.yml)
 automatically builds, scans and pushes app-named images to ACR on `dev` pushes.
 Manual `build` uses the same automatic `code-to-cloud-images` environment.
-Other manual operations use GitHub OIDC and the independently reviewed
-`code-to-cloud-training` environment. Configure the deployment environment's
+An explicitly enabled dependent rollout then updates and verifies every enabled
+training app using the separate `code-to-cloud-training` deployment identity.
+Other manual operations also use that environment. Configure its
 `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`,
 `DOJO_RESOURCE_GROUP`, `DOJO_LOCATION`, `DOJO_OPERATOR_OBJECT_ID`, and
-`DOJO_ADMIN_CIDR` environment variables, then require an environment reviewer.
+`DOJO_ADMIN_CIDR` environment variables. Use the automatic-dev setup below or
+retain an independent reviewer for manual-only operation.
 The Entra application's federated credential must use audience
 `api://AzureADTokenExchange` and subject
 `repo:ninjapaw@301718044/code-to-cloud-security-dojo@1395015776:environment:code-to-cloud-training`.
@@ -164,11 +166,12 @@ npm run setup:github-oidc -- --remove \
   --operator-object-id <entra-object-id> --admin-cidr <public-ip>/32
 ```
 
-The environment is restricted to `dev` with self-review disabled. Add a separate
-trusted reviewer before dispatching from the account that configured the trust;
-the bootstrap cannot manufacture an independent human approval boundary.
-The image-publishing lane does not require a reviewer; the deployment lane still
-does. Provision and protection need cost consent; a successful automatic build
+Both environments are restricted to `dev`. Manual-review mode has self-review disabled;
+add a separate trusted reviewer, since the bootstrap cannot manufacture
+an independent human approval boundary. Automatic dev rollout is an explicit
+configuration choice, not a bot submitting its own reviews.
+Provision and protection still need separate manual dispatch and cost consent;
+a successful automatic build
 pushes the scanned images to ACR, reads their digests back, and uploads immutable
 release evidence. What-if consumes that build run; deploy consumes the same run
 and requires the exact token printed by what-if. Both lanes run only from `dev`,
@@ -201,10 +204,51 @@ Organization Docker secrets are already available to both environments when
 their repository policy allows this repository.
 
 The image-only `drowsy-dragon-images` CI environment also allows only `dev`
-without required reviewers. Keep reviewers and self-review prevention on
-`code-to-cloud-training`. This is deliberate separation of publish and deploy
+without required reviewers. Keep reviewers on `code-to-cloud-training` for
+manual-only deployments, or explicitly enable automatic dev rollout below.
+This is deliberate separation of publish and deploy
 permissions, not an auto-approval bot. Each lane has a separate concurrency group
 so a waiting deployment review cannot block an image upload.
+
+### Automatic Dev Rollout
+
+Set `DOJO_AUTOMATIC_ROLLOUT=true` as both a repository variable (job selection)
+and a `code-to-cloud-training` environment variable (execution consent).
+For this explicitly approved mode, remove the environment's required reviewers
+and wait timer but retain its exact `dev` **branch** policy. The OIDC bootstrap
+honors this environment flag on subsequent reconciliation. Disable the repository
+flag to stop automatic rollouts; restore environment reviewers for manual-only
+operation. Do not enable this training-only mode for production.
+
+The dependent `rollout` job runs only after the same run's build, scans, ACR
+push and release-artifact upload succeed. It verifies the source SHA, configuration,
+scan hashes and registry digests again. It records a fresh ARM preview and rejects
+resource creation, deletion, out-of-scope changes, and changes outside the
+existing app-release resources. Infrastructure expansion, paid Defender changes,
+credential rotation and cleanup remain separate operations.
+
+Hosted runners use a temporary portal allowance for their one public IPv4 `/32`,
+named for the workflow run and attempt. Portal and SCM remain deny-by-default.
+The controller removes the exact rule in `finally`; an `always()` workflow step
+repeats idempotent cleanup, including on normal cancellation. Forced termination
+or an unavailable ARM API can still interrupt cleanup: inspect and remove the
+specific `GitHubRollout-<run-id>-<attempt>` rule before retrying. No storage
+firewall is opened and no private NGINX endpoint becomes public.
+
+Before publishing new image receipts, the job starts the verified portal image
+and waits for its image-baked source revision on `/health`. This lets a new
+approved base-image recipe be validated by the matching portal code. It then
+publishes the scan receipts through the authenticated portal/VNet path, applies
+the release Bicep, reconciles the ACI scan-hash tag with the exact deployed image,
+and verifies all enabled app digests, portal revision, private HTTP/storage
+connectivity and optional-image scan evidence.
+
+The `dojo-rollout-<run-id>-<attempt>` artifact retains the preview and live report.
+An unverified GitHub/Defender connector remains an explicit independent check,
+not a failed application rollout or a claim of security coverage. Any missing
+runtime image, package receipt or required health observation fails the job.
+Partial deployment failures are reported; retained old images/evidence support
+a separately reviewed rollback rather than an unverified automatic rollback.
 
 Optional-image selection comes from committed defaults and protected GitHub
 environment variables; the workflow does not force the demos off:
@@ -222,8 +266,9 @@ Linux runner as a JSON array of labels, for example
 `["self-hosted","linux","x64","dojo-training"]`. It is repository-scoped because
 runner selection happens before environment variables are available. If unset,
 the deployment workflow uses `ubuntu-latest`. Provision a suitable runner through
-your normal administration process; the workflow does not register one or widen
-firewalls. Keep untrusted pull-request jobs off a privileged deployment runner.
+your normal administration process; the workflow does not register one.
+Only automatic rollout uses the bounded temporary portal allowance described
+above. Keep untrusted pull-request jobs off a privileged deployment runner.
 
 Set both image flags to `true` for the complete four-application release.
 Unset configuration variables preserve committed defaults, which keep optional
@@ -236,7 +281,7 @@ verifies registration rather than silently registering providers.
 `DOJO_VIA_PORTAL` defaults to `false`. A runner using it must reach the portal
 from an authorized IP/private path and read its credentials from Key Vault.
 Setting it does not allowlist a public GitHub-hosted runner or change network
-rules. Deployment, verify and report check portal reachability before attempting
+rules. Manual deployment, verify and report check portal reachability before attempting
 the authenticated private-evidence path. DHI image access must be available on
 the selected runner. Docker requires login to `dhi.io`, including for free
 Community images. Set organization secrets `DOCKER_USERNAME` and `DOCKER_TOKEN`
@@ -290,7 +335,9 @@ After downloading and extracting a container artifact, verify `SHA256SUMS` and
 load the image with `docker image load --input image.tar` from its directory.
 Do not run deliberately vulnerable images outside an isolated training host.
 
-For all four images, enable both protected feature flags above, then:
+For all four images, enable both protected feature flags above. With automatic
+dev rollout enabled, `dev` pushes and manual `build` runs perform the complete
+build, push, preview, update and verification sequence. For manual-only operation:
 
 1. Run validation on `dev` with both optional-image inputs enabled and review its
    tests, scans and container artifacts.
@@ -303,9 +350,9 @@ For all four images, enable both protected feature flags above, then:
    optional-image cost consent. Use an authorized runner for private evidence.
 5. Dispatch `verify` and check live digests, HTTP health and private receipts.
 
-Image publishing is automatic, but the workflow does not auto-approve an
-application deployment or bypass its state-bound confirmation. A pending
-deployment review is not a successful rollout.
+Manual releases still require the exact state-bound confirmation. Automatic
+releases replace that manual prompt only with explicit dev consent and the
+bounded preview checks; build or verification failures never become approval.
 
 Defender GitHub consent, repository discovery, native GitHub security features and
 agentless scanner eligibility are separate prerequisites. Connect this repository

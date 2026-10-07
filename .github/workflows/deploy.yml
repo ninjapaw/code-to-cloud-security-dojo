@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: Guarded lifecycle operation (build publishes Dockerfile images and artifacts)
+        description: Lifecycle operation (build publishes images and runs the enabled automatic dev rollout)
         type: choice
         required: true
         options:
@@ -311,3 +311,99 @@ jobs:
       - name: Sign out of the source registry
         if: always() && steps.dhi-login.outputs.authenticated == 'true'
         run: docker logout dhi.io
+
+  rollout:
+    needs: lifecycle
+    if: needs.lifecycle.result == 'success' && github.ref == 'refs/heads/dev' && (github.event_name == 'push' || inputs.operation == 'build') && vars.DOJO_AUTOMATIC_ROLLOUT == 'true'
+    runs-on: ${{ fromJSON(vars.DOJO_DEPLOY_RUNNER_LABELS || '["ubuntu-latest"]') }}
+    timeout-minutes: 45
+    environment: code-to-cloud-training
+    concurrency:
+      group: dojo-deployment-code-to-cloud-training
+      cancel-in-progress: false
+    env:
+      DOJO_AUTOMATIC_ROLLOUT: ${{ vars.DOJO_AUTOMATIC_ROLLOUT }}
+      DOJO_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      DOJO_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      DOJO_RESOURCE_GROUP: ${{ vars.DOJO_RESOURCE_GROUP }}
+      DOJO_LOCATION: ${{ vars.DOJO_LOCATION }}
+      DOJO_OPERATOR_OBJECT_ID: ${{ vars.DOJO_OPERATOR_OBJECT_ID }}
+      DOJO_ADMIN_CIDR: ${{ vars.DOJO_ADMIN_CIDR }}
+      DOJO_DROWSY_DRAGON_ENABLED: ${{ vars.DOJO_DROWSY_DRAGON_ENABLED }}
+      DOJO_NGINX_PROXY_ENABLED: ${{ vars.DOJO_NGINX_PROXY_ENABLED }}
+      DOJO_NGINX_PROXY_MODE: ${{ vars.DOJO_NGINX_PROXY_MODE }}
+      DOJO_EVIDENCE_PUBLIC_ACCESS: ${{ vars.DOJO_EVIDENCE_PUBLIC_ACCESS }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Create the private rollout configuration
+        run: |
+          set -euo pipefail
+          config_path="$RUNNER_TEMP/dojo-rollout.json"
+          node scripts/workflow-config.mjs "$config_path"
+          echo "DOJO_CONFIG=$config_path" >> "$GITHUB_ENV"
+      - name: Download this build's verified release evidence
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: dojo-release-${{ github.run_id }}
+          path: output/code-to-cloud-training
+      - name: Verify same-run release provenance
+        run: |
+          set -euo pipefail
+          jq -e \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg sha "$GITHUB_SHA" \
+            '.runId == $runId
+              and .repository == $repository
+              and .workflow == ".github/workflows/deploy.yml"
+              and .ref == "refs/heads/dev"
+              and .sha == $sha
+              and .operation == "build"' \
+            output/code-to-cloud-training/workflow-provenance.json > /dev/null
+      - name: Sign in with the dev deployment identity
+        id: rollout-login
+        uses: azure/login@eec3c95657c1536435858eda1f3ff5437fee8474 # v2.3.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Identify the runner for a temporary single-IP portal allowance
+        id: runner-address
+        run: |
+          set -euo pipefail
+          address="$(curl --ipv4 --silent --show-error --fail --max-time 30 https://api.ipify.org)"
+          [[ "$address" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || {
+            echo "Could not determine one public runner IPv4 address." >&2
+            exit 1
+          }
+          echo "DOJO_ROLLOUT_RUNNER_IPV4=$address" >> "$GITHUB_ENV"
+      - name: Validate preview, update all apps and verify running release
+        run: |
+          node scripts/deploy.mjs deploy --automatic --via-portal --accept-costs \
+            --release output/code-to-cloud-training/release.json
+      - name: Remove the run-specific portal allowance
+        if: always() && steps.rollout-login.outcome == 'success' && steps.runner-address.outcome == 'success'
+        run: |
+          node --input-type=module <<'NODE'
+          import { loadConfig } from "./shared/config.mjs";
+          import { AzureClient } from "./shared/azure.mjs";
+          import { updateRunnerAccess } from "./scripts/lib/automatic-rollout.mjs";
+          const config = await loadConfig();
+          await updateRunnerAccess(config, new AzureClient(config), false);
+          console.log("Run-specific portal allowance removed; deny-by-default access preserved.");
+          NODE
+      - name: Retain rollout preview and runtime verification
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dojo-rollout-${{ github.run_id }}-${{ github.run_attempt }}
+          path: output/code-to-cloud-training/
+          if-no-files-found: error
+          retention-days: 30

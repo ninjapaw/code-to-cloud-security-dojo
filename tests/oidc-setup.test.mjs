@@ -46,4 +46,7 @@ test("bootstrap is dry-run by default and delegates only required scopes", async
   );
   assert.match(source, /retire:\$\{subscriptionId\}:\$\{resourceGroup\}/);
   assert.doesNotMatch(source, /client.?secret|credential reset/i);
+  assert.match(source, /getVariable\("DOJO_AUTOMATIC_ROLLOUT"\)/);
+  assert.match(source, /prevent_self_review: !automaticRollout/);
+  assert.match(source, /reviewers: automaticRollout \? \[\] :/);
 });

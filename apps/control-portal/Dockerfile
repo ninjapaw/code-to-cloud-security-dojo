@@ -9,6 +9,7 @@ COPY --from=dependencies /app/node_modules/ node_modules/
 COPY shared/ shared/
 COPY config/deploy.config.json config/deploy.config.json
 COPY apps/control-portal/ apps/control-portal/
-ENV NODE_ENV=production HOST=0.0.0.0 PORT=8080
+ARG DOJO_CODE_REVISION=unversioned
+ENV NODE_ENV=production HOST=0.0.0.0 PORT=8080 DOJO_CODE_REVISION=${DOJO_CODE_REVISION}
 EXPOSE 8080
 CMD ["apps/control-portal/server.mjs"]

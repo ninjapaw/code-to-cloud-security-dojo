@@ -26,6 +26,15 @@ import { buildNginxProxy, readNginxReceipt } from "./lib/nginx-proxy.mjs";
 import { buildDrowsyDragon, readDragonReceipt } from "./lib/drowsy-dragon.mjs";
 import { createDeploymentStatus } from "./lib/deployment-status.mjs";
 import {
+  automaticContext,
+  validateAutomaticPreview,
+  withRunnerAccess,
+  updateRunnerAccess,
+  prepareAutomaticPortal,
+  reconcileDragonScanTag,
+  verifyAutomaticRelease,
+} from "./lib/automatic-rollout.mjs";
+import {
   synchronizeSource,
   verifySource,
   prepareDojoImage,
@@ -54,6 +63,7 @@ const { values, positionals } = parseArgs({
     release: { type: "string" },
     audit: { type: "boolean" },
     "via-portal": { type: "boolean" },
+    automatic: { type: "boolean" },
   },
 });
 const action = positionals[0] || "plan";
@@ -88,6 +98,8 @@ async function main() {
     throw new Error(`Action must be one of: ${allowed.join(", ")}`);
   if (values["via-portal"] && !["deploy", "repair", "verify", "report", "what-if"].includes(action))
     throw new Error("--via-portal is supported only for deployment and evidence collection");
+  if (values.automatic && (action !== "deploy" || !values["via-portal"]))
+    throw new Error("--automatic is supported only for deploy --via-portal");
   const config = await loadConfig({
     offline: action === "plan" || action.startsWith("source-") || values.audit,
   });
@@ -450,6 +462,7 @@ async function main() {
           `org.opencontainers.image.source=${key === "dojo" ? config.source.repository.replace(/\.git$/, "") : "https://github.com/ninjapaw/code-to-cloud-security-dojo"}`,
           "--label",
           `org.opencontainers.image.revision=${key === "dojo" ? config.source.revision : run("git", ["rev-parse", "HEAD"])}`,
+          ...(key === "portal" ? ["--build-arg", `DOJO_CODE_REVISION=${release.codeRevision}`] : []),
           "-f",
           dockerfile,
           "-t",
@@ -572,6 +585,7 @@ async function main() {
       throw new Error(
         "Release was built from a different Git revision; rebuild and review it",
       );
+    if (values.automatic) automaticContext(config, release);
     const imageReceipts = [];
     if (config.drowsyDragonEnabled)
       imageReceipts.push(await readDragonReceipt(release.images.drowsyDragon));
@@ -612,7 +626,8 @@ async function main() {
       `Required confirmation: deploy:${deploymentHash}:${config.subscriptionId}:${config.resourceGroup}`,
     );
     if (action === "what-if") return;
-    requireConfirmation(config, `deploy:${deploymentHash}`, values.confirm);
+    if (values.automatic) validateAutomaticPreview(config, whatIf);
+    else requireConfirmation(config, `deploy:${deploymentHash}`, values.confirm);
     requireReleaseCostApproval(config, values["accept-costs"]);
     await updateStatus(
       "Checking Defender coverage and private Key Vault credentials",
@@ -623,7 +638,12 @@ async function main() {
         "Required Defender coverage missing. Review doctor and run separately approved protection action.",
       );
     await verifyPrivateCredentials(client, config, output, resourceNames);
-    if (imageReceipts.length) {
+    const applyRelease = async () => {
+      if (values.automatic) {
+        await updateStatus("Starting the verified portal revision before publishing new image receipts");
+        await prepareAutomaticPortal(config, release, client);
+      }
+      if (imageReceipts.length) {
       await updateStatus(
         "Recording optional image evidence in private Blob storage",
       );
@@ -635,8 +655,23 @@ async function main() {
         const store = new BlobEvidenceStore(resourceNames.storage, client.credential);
         for (const receipt of imageReceipts) await publishImageReceipt(store, receipt);
       }
-    }
-    await deployTemplate("main", parameters);
+      }
+      await deployTemplate("main", parameters);
+      if (values.automatic) {
+        await updateStatus("Reconciling release metadata and verifying all running image digests");
+        await updateRunnerAccess(config, client, true);
+        await reconcileDragonScanTag(config, release, client);
+        const report = await verifyAutomaticRelease(config, release, client);
+        const stamp = Date.now();
+        await writeFile(join(output, `rollout-verified-${stamp}.json`), JSON.stringify(report, null, 2));
+        await writeFile(join(output, `rollout-verified-${stamp}.html`), reportHtml(report));
+        for (const check of report.checks.filter((item) => item.state === "unknown"))
+          console.warn(`Independent verification remains: ${check.id}: ${check.detail}`);
+        await updateStatus("All enabled runtime images, private health checks and scan receipts verified");
+      }
+    };
+    if (values.automatic) await withRunnerAccess(config, client, applyRelease);
+    else await applyRelease();
     await writeFile(
       join(output, `release-deployed-${Date.now()}.json`),
       JSON.stringify(release, null, 2),

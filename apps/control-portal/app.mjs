@@ -59,6 +59,7 @@ export function createApp({
     response.json({
       status: "running",
       mode: preview ? "read-only-preview" : "configured",
+      codeRevision: config.codeRevision,
       securityEfficacy: "not-attested",
     }),
   );

@@ -16,6 +16,24 @@ const config = {
   dojoResourceId: "/subscriptions/test/target",
   dojoDigest: `sha256:${"a".repeat(64)}`,
 };
+test("portal health exposes the image revision but no configuration or credentials", async () => {
+  const app = createApp({
+    config: { ...config, codeRevision: "c".repeat(40) },
+    store: new MemoryEvidenceStore(),
+    reportProvider: async () => emptyReport(config),
+  });
+  const server = app.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  try {
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/health`);
+    assert.deepEqual(await response.json(), {
+      status: "running", mode: "configured",
+      codeRevision: "c".repeat(40), securityEfficacy: "not-attested",
+    });
+  } finally {
+    server.close();
+  }
+});
 test("fixed private health probe refuses redirects and foreign targets", async () => {
   let requests = 0;
   const fetcher = async (url, options) => {

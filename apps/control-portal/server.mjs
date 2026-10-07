@@ -20,6 +20,7 @@ const config = {
   subscriptionId: process.env.DOJO_SUBSCRIPTION_ID,
   resourceGroup: process.env.DOJO_RESOURCE_GROUP || base.resourceGroup,
   location: process.env.DOJO_LOCATION || base.location,
+  codeRevision: process.env.DOJO_CODE_REVISION,
   source: {
     repository: process.env.DOJO_SOURCE_REPOSITORY || base.source.repository,
     revision: process.env.DOJO_SOURCE_REVISION || base.source.revision,

@@ -130,7 +130,7 @@ test("deployment workflow forwards protected feature choices and the private por
   assert.match(workflow, /if \[\[ "\$ACCEPT_COSTS" == "true" \]\]; then deploy_args\+=\(--accept-costs\)/);
 });
 
-test("automatic pushes and manual builds cannot select the deployment identity or operation", async () => {
+test("the publisher job cannot select the deployment identity or operation", async () => {
   const workflow = await readFile(
     new URL("../.github/workflows/deploy.yml", import.meta.url), "utf8",
   );
@@ -173,6 +173,36 @@ test("automatic pushes and manual builds cannot select the deployment identity o
   assert.doesNotMatch(workflow, /pending_deployments|state.?=.?'approved'|deployments: write/);
 });
 
+test("automatic rollout depends on the same successful build, is dev-only, and always cleans runner access", async () => {
+  const workflow = await readFile(
+    new URL("../.github/workflows/deploy.yml", import.meta.url), "utf8",
+  );
+  const rollout = workflow.split(/\r?\n  rollout:\r?\n/)[1];
+  assert.ok(rollout);
+  assert.match(rollout, /needs: lifecycle/);
+  assert.match(rollout, /environment: code-to-cloud-training/);
+  assert.match(rollout, /group: dojo-deployment-code-to-cloud-training/);
+  const condition = rollout.match(/^    if: (.+)$/m)?.[1];
+  const context = {
+    needs: { lifecycle: { result: "success" } },
+    github: { ref: "refs/heads/dev", event_name: "push" },
+    inputs: {}, vars: { DOJO_AUTOMATIC_ROLLOUT: "true" },
+  };
+  assert.equal(runInNewContext(condition, context), true);
+  for (const override of [
+    { needs: { lifecycle: { result: "failure" } } },
+    { vars: { DOJO_AUTOMATIC_ROLLOUT: "false" } },
+    { github: { ref: "refs/heads/main", event_name: "push" } },
+    { github: { ref: "refs/heads/dev", event_name: "pull_request" } },
+  ])
+    assert.equal(runInNewContext(condition, { ...context, ...override }), false);
+  assert.match(rollout, /name: dojo-release-\$\{\{ github\.run_id \}\}/);
+  assert.match(rollout, /\.runId == \$runId[\s\S]*?\.sha == \$sha[\s\S]*?\.operation == "build"/);
+  assert.match(rollout, /deploy --automatic --via-portal --accept-costs/);
+  assert.match(rollout, /if: always\(\) && steps\.rollout-login\.outcome == 'success' && steps\.runner-address\.outcome == 'success'/);
+  assert.match(rollout, /await updateRunnerAccess\(config, new AzureClient\(config\), false\)/);
+  assert.doesNotMatch(rollout, /protection --|deprovision|provision --|rotate|pending_deployments/);
+});
 test("automatic publisher has registry-scoped push and read-only ownership access, not deployment rights", async () => {
   const template = await readFile(
     new URL("../infra/image-publisher.bicep", import.meta.url), "utf8",

@@ -77,14 +77,24 @@ Validation CI has no Azure credentials. The automatic publisher uses a separate
 managed identity with registry-scoped `AcrPush` and resource-group `Reader`, not
 application deployment or credential-management permissions. Trusted `dev`
 builds record intentional workload findings but gate HIGH/CRITICAL findings in
-the control-portal image before publishing. Application deployment and paid
-Defender changes still require separate operator approval. No detection,
+the control-portal image before publishing. Explicitly enabled automatic `dev`
+rollout uses a separate deployment identity only after the same build succeeds.
+It rejects resource creation/deletion and out-of-scope preview changes, and
+requires exact runtime digests, private health and scan evidence. Paid Defender
+changes, infrastructure expansion and destructive operations remain manual.
+No detection,
 prevention, compliance outcome or risk reduction is guaranteed by this project.
 
 Drowsy Dragon's CI scan uses DHI registry credentials on trusted `dev` pushes
 and enabled manual `dev` runs, never on pull requests or other branches.
 Image-only environments are dev-restricted and run without required reviewers;
-the `code-to-cloud-training` deployment environment retains independent review.
+`code-to-cloud-training` retains independent review unless an operator explicitly
+enables `DOJO_AUTOMATIC_ROLLOUT` for the dev-only training lab. A temporary
+run-specific portal IPv4 `/32` allowance supports authenticated hosted-runner
+access; controller `finally` and workflow `always()` cleanup remove it. Forced
+termination can interrupt cleanup, so review stale run-specific rules after an
+interrupted rollout. Storage stays private, SCM stays blocked, and no NGINX
+public ingress is enabled.
 Never forward registry credentials into an image or Azure runtime;
 Azure pulls from the lab ACR using managed identity. Keep its raw scanner
 receipts private, verify digest/hash bindings, and treat missing evidence as
