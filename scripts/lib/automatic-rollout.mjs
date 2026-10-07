@@ -39,7 +39,7 @@ export function automaticContext(config, release, environment = process.env) {
     ipAddress: `${ip}/32`,
     priority: 101,
     action: "Allow",
-    description: "Temporary authenticated GitHub rollout; removed on completion",
+    description: "Temporary authenticated GitHub rollout - removed on completion",
   };
 }
 

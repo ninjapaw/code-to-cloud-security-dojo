@@ -48,6 +48,7 @@ const group = `/subscriptions/${config.subscriptionId}/resourceGroups/${config.r
 test("automatic rollout is explicit, same-revision and limited to the trusted dev workflow", () => {
   assert.equal(automaticContext(config, release, environment).ipAddress, "203.0.113.11/32");
   assert.equal(automaticContext(config, release, environment).name, "GitHubRollout-1234-1");
+  assert.doesNotMatch(automaticContext(config, release, environment).description, /[;,]/);
   for (const changes of [
     { GITHUB_ACTIONS: "false" }, { GITHUB_REF: "refs/heads/main" },
     { GITHUB_EVENT_NAME: "pull_request" }, { GITHUB_EVENT_NAME: "pull_request_target" },
