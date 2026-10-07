@@ -1,6 +1,8 @@
 name: Code to Cloud Security Dojo deployment
 
 on:
+  push:
+    branches: [dev]
   workflow_dispatch:
     inputs:
       operation:
@@ -39,16 +41,17 @@ permissions:
   id-token: write
 
 concurrency:
-  group: dojo-deployment-code-to-cloud-training
+  group: ${{ (github.event_name == 'push' || inputs.operation == 'build') && 'dojo-images-code-to-cloud-training' || 'dojo-deployment-code-to-cloud-training' }}
   cancel-in-progress: false
 
 jobs:
   lifecycle:
-    if: github.ref == 'refs/heads/dev'
+    if: github.ref == 'refs/heads/dev' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ${{ fromJSON(vars.DOJO_DEPLOY_RUNNER_LABELS || '["ubuntu-latest"]') }}
     timeout-minutes: 90
-    environment: code-to-cloud-training
+    environment: ${{ (github.event_name == 'push' || inputs.operation == 'build') && 'code-to-cloud-images' || 'code-to-cloud-training' }}
     env:
+      OPERATION: ${{ github.event_name == 'push' && 'build' || inputs.operation }}
       AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
       AZURE_PROTECTION_CLIENT_ID: ${{ vars.AZURE_PROTECTION_CLIENT_ID }}
       DOJO_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
@@ -77,8 +80,7 @@ jobs:
       - name: Validate target approval and create private configuration
         id: configuration
         env:
-          CONFIRM_RESOURCE_GROUP: ${{ inputs.confirm-resource-group }}
-          OPERATION: ${{ inputs.operation }}
+          CONFIRM_RESOURCE_GROUP: ${{ github.event_name == 'push' && vars.DOJO_RESOURCE_GROUP || inputs.confirm-resource-group }}
           ACCEPT_COSTS: ${{ inputs.accept-costs }}
         run: |
           set -euo pipefail
@@ -111,14 +113,14 @@ jobs:
           console.log(`drowsy-dragon=${config.drowsyDragonEnabled === true}`);
           NODE
       - name: Test Dockerfile build and release guardrails
-        if: inputs.operation == 'build'
+        if: env.OPERATION == 'build'
         run: |
           npm test
           npm run source:check
           npm run image:check:nginx
           npm run check:public
       - name: Check access to the pinned DHI source image
-        if: inputs.operation == 'build' && steps.configuration.outputs.drowsy-dragon == 'true'
+        if: env.OPERATION == 'build' && steps.configuration.outputs.drowsy-dragon == 'true'
         id: dhi-login
         env:
           DHI_USERNAME: ${{ secrets.DHI_USERNAME }}
@@ -128,8 +130,8 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -n "$DHI_USERNAME" || -n "$DHI_TOKEN" ]]; then
-            : "${DHI_USERNAME:?Set both DHI credentials in the code-to-cloud-training environment}"
-            : "${DHI_TOKEN:?Set both DHI credentials in the code-to-cloud-training environment}"
+            : "${DHI_USERNAME:?Set both DHI credentials in the code-to-cloud-images environment}"
+            : "${DHI_TOKEN:?Set both DHI credentials in the code-to-cloud-images environment}"
           else
             : "${DOCKER_USERNAME:?Set DOCKER_USERNAME and DOCKER_TOKEN organization secrets and grant this repository access}"
             : "${DOCKER_TOKEN:?Set DOCKER_USERNAME and DOCKER_TOKEN organization secrets and grant this repository access}"
@@ -157,7 +159,7 @@ jobs:
           run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RELEASE_RUN_ID")"
           jq -e \
             --arg sha "$GITHUB_SHA" \
-            '.event == "workflow_dispatch"
+            '(.event == "workflow_dispatch" or .event == "push")
               and .path == ".github/workflows/deploy.yml"
               and .head_branch == "dev"
               and .head_sha == $sha
@@ -196,7 +198,6 @@ jobs:
             }
       - name: Execute guarded lifecycle operation
         env:
-          OPERATION: ${{ inputs.operation }}
           ACCEPT_COSTS: ${{ inputs.accept-costs }}
           RELEASE_RUN_ID: ${{ inputs.release-run-id }}
           RELEASE_CONFIRMATION: ${{ inputs.release-confirmation }}
@@ -249,7 +250,7 @@ jobs:
               ;;
           esac
       - name: Export the scanned release images and Dockerfiles
-        if: success() && inputs.operation == 'build'
+        if: success() && env.OPERATION == 'build'
         run: |
           node --input-type=module <<'NODE'
           import { readFile } from "node:fs/promises";
@@ -268,7 +269,7 @@ jobs:
           }
           NODE
       - name: Upload the app-named container images
-        if: success() && inputs.operation == 'build'
+        if: success() && env.OPERATION == 'build'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: dojo-container-images-${{ github.run_id }}
@@ -277,7 +278,7 @@ jobs:
           compression-level: 1
           retention-days: 7
       - name: Record build workflow provenance
-        if: success() && inputs.operation == 'build'
+        if: success() && env.OPERATION == 'build'
         run: |
           set -euo pipefail
           jq -n \
@@ -290,7 +291,7 @@ jobs:
             '{runId: $runId, repository: $repository, workflow: $workflow, ref: $ref, sha: $sha, operation: $operation}' \
             > output/code-to-cloud-training/workflow-provenance.json
       - name: Retain immutable release and review evidence
-        if: always() && (inputs.operation == 'build' || inputs.operation == 'what-if' || inputs.operation == 'deploy' || inputs.operation == 'verify' || inputs.operation == 'report')
+        if: always() && (env.OPERATION == 'build' || inputs.operation == 'what-if' || inputs.operation == 'deploy' || inputs.operation == 'verify' || inputs.operation == 'report')
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: dojo-release-${{ github.run_id }}

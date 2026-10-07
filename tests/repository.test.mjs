@@ -66,14 +66,14 @@ test("owned labels use product and component names", async () => {
   assert.match(readme, /self-review disabled/);
   assert.doesNotMatch(readme, /\bscen(?:ario|airo)s?\b/i);
 });
-test("deployment workflow is OIDC-only, staged and approval-gated", async () => {
+test("deployment workflow is OIDC-only with separate publishing and deployment environments", async () => {
   const workflow = await readFile(
     join(root, ".github/workflows/deploy.yml"),
     "utf8",
   );
   assert.match(workflow, /id-token: write/);
   assert.match(workflow, /actions: read/);
-  assert.match(workflow, /environment: code-to-cloud-training/);
+  assert.match(workflow, /environment: \$\{\{ \(github\.event_name == 'push' \|\| inputs\.operation == 'build'\) && 'code-to-cloud-images' \|\| 'code-to-cloud-training' \}\}/);
   assert.match(workflow, /github\.ref == 'refs\/heads\/dev'/);
   assert.match(workflow, /uses: azure\/login@[a-f0-9]{40} # v2\.3\.0/);
   assert.match(workflow, /confirm-resource-group/);

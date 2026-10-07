@@ -150,11 +150,14 @@ integration. Its image job runs on pushes to `dev` and is enabled by default for
 manual `dev` runs. Clear the `drowsy-dragon` checkbox to skip a particular manual
 run. Pull requests and other branches cannot run this protected job.
 
-The `drowsy-dragon-images` environment still requires approval; a pending review
-is different from a skipped job. Configure organization secrets `DOCKER_USERNAME`
+The image-only `drowsy-dragon-images` environment is restricted to `dev` and does
+not require manual approval. Configure organization secrets `DOCKER_USERNAME`
 and `DOCKER_TOKEN` and allow this repository to use both. Use a Docker access
 token authorized to pull the pin. The release build consumes the same secret
-names after its separate `code-to-cloud-training` approval.
+names in the automatic `code-to-cloud-images` publishing environment. On `dev`
+pushes, the release workflow builds, scans and pushes the app-named image to ACR
+with its dedicated registry-only writer identity. Application rollout remains
+separately approved in `code-to-cloud-training`.
 
 A complete `DHI_USERNAME`/`DHI_TOKEN` pair in the relevant environment overrides
 the organization Docker pair. Incomplete pairs fail explicitly rather than

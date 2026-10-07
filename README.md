@@ -117,8 +117,11 @@ It has **no Azure deployment credentials or write operations**. WebGoat
 vulnerabilities are intentional and require review; high or critical portal image
 vulnerabilities fail the release build.
 
-The separate [manual deployment workflow](.github/workflows/deploy.yml) uses
-GitHub OIDC and the protected `code-to-cloud-training` environment. Configure its
+The separate [publishing and deployment workflow](.github/workflows/deploy.yml)
+automatically builds, scans and pushes app-named images to ACR on `dev` pushes.
+Manual `build` uses the same automatic `code-to-cloud-images` environment.
+Other manual operations use GitHub OIDC and the independently reviewed
+`code-to-cloud-training` environment. Configure the deployment environment's
 `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`,
 `DOJO_RESOURCE_GROUP`, `DOJO_LOCATION`, `DOJO_OPERATOR_OBJECT_ID`, and
 `DOJO_ADMIN_CIDR` environment variables, then require an environment reviewer.
@@ -164,11 +167,44 @@ npm run setup:github-oidc -- --remove \
 The environment is restricted to `dev` with self-review disabled. Add a separate
 trusted reviewer before dispatching from the account that configured the trust;
 the bootstrap cannot manufacture an independent human approval boundary.
-It exposes the guarded lifecycle as separate runs: provision and protection need
-cost consent; build uploads immutable release evidence; what-if consumes that
-build run; deploy consumes the same run and requires the exact token printed by
-what-if. It runs only from `dev`, never uses client secrets, and does not automate
+The image-publishing lane does not require a reviewer; the deployment lane still
+does. Provision and protection need cost consent; a successful automatic build
+pushes the scanned images to ACR, reads their digests back, and uploads immutable
+release evidence. What-if consumes that build run; deploy consumes the same run
+and requires the exact token printed by what-if. Both lanes run only from `dev`,
+never use client secrets, and do not automate
 cleanup, credential rotation, GitHub connector consent, or plan downgrades.
+
+### Automatic Image Publishing Setup
+
+Deploy [the publisher identity template](infra/image-publisher.bicep) into the
+existing owned training resource group after reviewing its ARM what-if.
+It creates a dedicated user-assigned managed identity, one GitHub federated
+credential, registry-scoped `AcrPush`, and resource-group `Reader` for the build's
+ownership check. It grants no application deployment, RBAC administration,
+Key Vault data, Blob data, or Defender-write permissions.
+
+Supply `labId`, the existing `registryName`, and `githubEnvironmentSubject`.
+Generate the subject with the existing
+[immutable-subject helper](scripts/github-oidc-subject.mjs) for
+`code-to-cloud-images`; in this repository it is
+`repo:ninjapaw@301718044/code-to-cloud-security-dojo@1395015776:environment:code-to-cloud-images`.
+Do not reuse the broadly privileged deployment identity for automatic publishing.
+
+Create `code-to-cloud-images` with a custom deployment-branch policy allowing
+only the `dev` branch and no required reviewers or wait timer. Set its
+`AZURE_CLIENT_ID` to the template's `clientId` output. Copy the non-secret
+`AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` and `DOJO_*` configuration variables
+from `code-to-cloud-training`, keeping all release configuration choices equal.
+Do not copy `AZURE_PROTECTION_CLIENT_ID` or the deployment client ID.
+Organization Docker secrets are already available to both environments when
+their repository policy allows this repository.
+
+The image-only `drowsy-dragon-images` CI environment also allows only `dev`
+without required reviewers. Keep reviewers and self-review prevention on
+`code-to-cloud-training`. This is deliberate separation of publish and deploy
+permissions, not an auto-approval bot. Each lane has a separate concurrency group
+so a waiting deployment review cannot block an image upload.
 
 Optional-image selection comes from committed defaults and protected GitHub
 environment variables; the workflow does not force the demos off:
@@ -191,7 +227,7 @@ firewalls. Keep untrusted pull-request jobs off a privileged deployment runner.
 
 Set both image flags to `true` for the complete four-application release.
 Unset configuration variables preserve committed defaults, which keep optional
-demos off. Keep the values unchanged across build, what-if and deploy: changing
+demos off. Keep the same values in both environments across build, what-if and deploy: changing
 them invalidates the configuration-bound release. NGINX must be provisioned
 before its first release, and optional-image deployments require `accept-costs`.
 The OIDC setup registers `Microsoft.ContainerInstance` for Dragon; `provision`
@@ -215,12 +251,12 @@ workflows never fetch credentials from a workstation or attempt anonymous pulls.
 The protected Drowsy Dragon CI job runs on pushes to `dev` and is enabled by
 default for manual runs on `dev`. Clear the `drowsy-dragon` checkbox to skip it
 for an individual manual run. Pull requests and other branches do not run this
-protected job. Environment approval still applies: a selected job may wait for
-review, but it is no longer skipped on ordinary `dev` pushes.
+dev-only job. The image-only environment does not require review; ordinary `dev`
+pushes build without manual approval.
 It needs authenticated access to its pinned DHI image, not Azure credentials.
 Shared organization secrets remain subject to their repository-access policy;
 use the protected `drowsy-dragon-images` environment for any DHI-specific
-credential override. Release builds use `code-to-cloud-training`. The job
+credential override. Release builds use `code-to-cloud-images`. The job
 retains all-severity Trivy JSON/SARIF and package inventory
 without inventing an expected CVE list. Its portal/report tracking keeps Trivy
 evidence separate from Defender observations.
@@ -258,16 +294,18 @@ For all four images, enable both protected feature flags above, then:
 
 1. Run validation on `dev` with both optional-image inputs enabled and review its
    tests, scans and container artifacts.
-2. Dispatch the deployment workflow with `operation=build` and the exact resource
-   group confirmation. A different authorized reviewer must approve it.
+2. Use the automatic publishing run for that `dev` commit, or manually dispatch
+   `operation=build` with the exact resource group confirmation. The images are
+   scanned and pushed to ACR without a manual image-publication approval.
 3. After success, dispatch `what-if` on that same commit with the build run ID.
    Review its actual infrastructure changes and printed deployment token.
 4. Dispatch `deploy` with the same build run ID, the exact token, and explicit
    optional-image cost consent. Use an authorized runner for private evidence.
 5. Dispatch `verify` and check live digests, HTTP health and private receipts.
 
-The workflow does not auto-approve itself or bypass the state-bound deployment
-confirmation. A pending environment review is not a successful build or release.
+Image publishing is automatic, but the workflow does not auto-approve an
+application deployment or bypass its state-bound confirmation. A pending
+deployment review is not a successful rollout.
 
 Defender GitHub consent, repository discovery, native GitHub security features and
 agentless scanner eligibility are separate prerequisites. Connect this repository

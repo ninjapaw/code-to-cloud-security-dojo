@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { runInNewContext } from "node:vm";
 import { workflowConfig } from "../scripts/workflow-config.mjs";
 import { configHash } from "../scripts/lib/lifecycle.mjs";
 
@@ -127,6 +128,65 @@ test("deployment workflow forwards protected feature choices and the private por
   assert.match(workflow, /verify\|report\)[\s\S]*?scripts\/deploy\.mjs "\$OPERATION" "\$\{portal_args\[@\]\}"/);
   assert.match(workflow, /deploy_args\+=\("\$\{portal_args\[@\]\}"\)/);
   assert.match(workflow, /if \[\[ "\$ACCEPT_COSTS" == "true" \]\]; then deploy_args\+=\(--accept-costs\)/);
+});
+
+test("automatic pushes and manual builds cannot select the deployment identity or operation", async () => {
+  const workflow = await readFile(
+    new URL("../.github/workflows/deploy.yml", import.meta.url), "utf8",
+  );
+  assert.match(workflow, /on:\r?\n  push:\r?\n    branches: \[dev\]/);
+  assert.doesNotMatch(workflow, /^  pull_request(?:_target)?:/m);
+  const environment = workflow.match(/^    environment: \$\{\{ (.+) \}\}$/m)?.[1];
+  const operation = workflow.match(/^      OPERATION: \$\{\{ (.+) \}\}$/m)?.[1];
+  const concurrency = workflow.match(/^  group: \$\{\{ (.+) \}\}$/m)?.[1];
+  const enabled = workflow.match(/^    if: (.+)$/m)?.[1];
+  assert.ok(environment && operation && concurrency && enabled);
+  assert.equal((workflow.match(/^\s+OPERATION:/gm) || []).length, 1);
+  for (const [event, input, expectedOperation, expectedEnvironment] of [
+    ["push", undefined, "build", "code-to-cloud-images"],
+    ["push", "deploy", "build", "code-to-cloud-images"],
+    ["workflow_dispatch", "build", "build", "code-to-cloud-images"],
+    ...["doctor", "provision", "protection", "what-if", "deploy", "verify", "report"]
+      .map((input) => ["workflow_dispatch", input, input, "code-to-cloud-training"]),
+  ]) {
+    const context = { github: { event_name: event, ref: "refs/heads/dev" }, inputs: { operation: input } };
+    assert.equal(runInNewContext(enabled, context), true);
+    assert.equal(runInNewContext(operation, context), expectedOperation);
+    assert.equal(runInNewContext(environment, context), expectedEnvironment);
+    assert.equal(
+      runInNewContext(concurrency, context),
+      expectedOperation === "build" ? "dojo-images-code-to-cloud-training" : "dojo-deployment-code-to-cloud-training",
+    );
+  }
+  for (const [event, ref] of [
+    ["pull_request", "refs/heads/dev"], ["pull_request_target", "refs/heads/dev"],
+    ["push", "refs/heads/main"], ["workflow_dispatch", "refs/heads/main"],
+  ])
+    assert.equal(runInNewContext(enabled, {
+      github: { event_name: event, ref }, inputs: { operation: "build" },
+    }), false);
+  assert.match(workflow, /CONFIRM_RESOURCE_GROUP: \$\{\{ github\.event_name == 'push' && vars\.DOJO_RESOURCE_GROUP \|\| inputs\.confirm-resource-group \}\}/);
+  assert.match(workflow, /\(\.event == "workflow_dispatch" or \.event == "push"\)/);
+  assert.match(workflow, /\.head_sha == \$sha/);
+  assert.match(workflow, /\.operation == "build"/);
+  assert.match(workflow, /if: env\.OPERATION == 'build'/);
+  assert.doesNotMatch(workflow, /pending_deployments|state.?=.?'approved'|deployments: write/);
+});
+
+test("automatic publisher has registry-scoped push and read-only ownership access, not deployment rights", async () => {
+  const template = await readFile(
+    new URL("../infra/image-publisher.bicep", import.meta.url), "utf8",
+  );
+  assert.match(template, /Microsoft\.ManagedIdentity\/userAssignedIdentities@2024-11-30/);
+  assert.match(template, /federatedIdentityCredentials@2024-11-30/);
+  assert.match(template, /issuer: 'https:\/\/token\.actions\.githubusercontent\.com'/);
+  assert.match(template, /audiences: \['api:\/\/AzureADTokenExchange'\]/);
+  assert.match(template, /subject: githubEnvironmentSubject/);
+  assert.match(template, /var acrPushRole = '8311e382-0749-4cb8-b61a-304f252e45ec'/);
+  assert.match(template, /var readerRole = 'acdd72a7-3385-48ef-bd42-f606fba81ae7'/);
+  assert.match(template, /resource push[\s\S]*?scope: registry[\s\S]*?roleDefinitionId:.*acrPushRole/);
+  assert.equal((template.match(/Microsoft\.Authorization\/roleAssignments@/g) || []).length, 2);
+  assert.doesNotMatch(template, /b24988ac-6180-42a0-ab88-20f7382dd24c|f58310d9-a9f6-439a-9e8d-f62e7b41a168|b86a8fe4-44ce-4948-aee5-eccb2c155cd7|ba92f5b4-2d11-453d-a403-e96b0029c9fe|client.?secret|listKeys/i);
 });
 
 test("release image artifacts are scan-bound and separate from deployment evidence", async () => {
