@@ -169,6 +169,25 @@ test("validation exports all image recipes without Azure credentials or deployin
   assert.doesNotMatch(workflow, /azure\/login|id-token: write|docker push|scripts\/deploy\.mjs deploy/);
 });
 
+test("Drowsy Dragon is selected for dev pushes and defaults on for manual dev builds", async () => {
+  const workflow = await readFile(
+    new URL("../.github/workflows/dojo.yml", import.meta.url), "utf8",
+  );
+  const input = workflow.match(/^      drowsy-dragon:\r?\n([\s\S]*?)^      nginx-proxy:/m)?.[1];
+  assert.ok(input, "Manual Drowsy Dragon input must exist");
+  assert.match(input, /type: boolean/);
+  assert.match(input, /default: true/);
+  const job = workflow.match(/^  drowsy-dragon:\r?\n([\s\S]*?)^  validate-and-scan:/m)?.[1];
+  assert.ok(job, "Protected Drowsy Dragon job must exist");
+  assert.equal(
+    job.match(/    if: ([^\r\n]+)/)?.[1],
+    "github.ref == 'refs/heads/dev' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.drowsy-dragon))",
+  );
+  assert.match(job, /environment: drowsy-dragon-images/);
+  assert.match(job, /npm run image:build:dragon -- --tag drowsy-dragon:scan/);
+  assert.match(job, /name: drowsy-dragon-container/);
+});
+
 test("DHI access uses environment secrets only when supplied and always verifies the pinned pull", async () => {
   for (const name of ["deploy", "dojo"]) {
     const workflow = await readFile(

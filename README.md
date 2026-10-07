@@ -208,16 +208,20 @@ DHI credentials are configured. If the registry requires authentication, set bot
 credentials are passed through stdin and removed from Docker after use. The
 workflow never copies credentials from another environment or a workstation.
 
-The optional Drowsy Dragon CI job is manually enabled and needs access to its
-pinned DHI image, not Azure credentials. If authenticated access is needed,
-store DHI pull credentials only in the protected
+The protected Drowsy Dragon CI job runs on pushes to `dev` and is enabled by
+default for manual runs on `dev`. Clear the `drowsy-dragon` checkbox to skip it
+for an individual manual run. Pull requests and other branches do not run this
+protected job. Environment approval still applies: a selected job may wait for
+review, but it is no longer skipped on ordinary `dev` pushes.
+It needs access to its pinned DHI image, not Azure credentials. If authenticated
+access is needed, store DHI pull credentials only in the protected
 `drowsy-dragon-images` environment restricted to `dev`, not as repository-wide
 secrets. The job retains all-severity Trivy JSON/SARIF and package inventory
 without inventing an expected CVE list. Its portal/report tracking keeps Trivy
 evidence separate from Defender observations.
 The independent NGINX CI job builds/scans both affected and target-CVE remediated
-modes on pushes and pull requests. Drowsy Dragon remains manual because it needs
-DHI credentials. Both optional demos use the same package/scan evidence helpers,
+modes on pushes and pull requests. Drowsy Dragon remains limited to trusted
+`dev` builds. Both optional demos use the same package/scan evidence helpers,
 and may be enabled together for a four-image release including the admin portal.
 
 ### GitHub Image Artifacts
@@ -233,7 +237,7 @@ removes partial exports on failure.
 | --- | --- |
 | Validation | `webgoat-and-portal-containers` |
 | Validation | `nginx-proxy-vulnerable-container`, `nginx-proxy-remediated-container` |
-| Validation, optional protected job | `drowsy-dragon-container` |
+| Validation, protected `dev` job | `drowsy-dragon-container` |
 | Deployment, `build` operation | `dojo-container-images-<run-id>`, grouped by each Azure app name |
 
 Image archives are retained for seven days to bound storage costs. Release

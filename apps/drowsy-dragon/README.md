@@ -142,15 +142,21 @@ metadata together, then rebuild, rescan and deploy through the same gates.
 Compare same-scope snapshots and individual findings; a lower count alone is
 not proof that a particular CVE was fixed.
 
-## Optional CI evidence
+## CI evidence
 
 The [validation workflow](../../.github/workflows/dojo.yml) always tests the
-integration. Its additional image job runs only on an explicit manual dispatch
-with the `drowsy-dragon` boolean enabled. Configure the `DHI_USERNAME` and
-`DHI_TOKEN` secrets only in the protected `drowsy-dragon-images` environment,
-restricted to `dev`, for an account authorized to pull the pin. The job fails
-explicitly if either is missing, signs out after use, and retains the
-`drowsy-dragon-evidence` artifact. It has no Azure credentials or deployment step.
+integration. Its image job runs on pushes to `dev` and is enabled by default for
+manual `dev` runs. Clear the `drowsy-dragon` checkbox to skip a particular manual
+run. Pull requests and other branches cannot run this protected job.
+
+The `drowsy-dragon-images` environment still requires approval; a pending review
+is different from a skipped job. If authenticated registry access is needed,
+configure both `DHI_USERNAME` and `DHI_TOKEN` in that environment for an account
+authorized to pull the pin. With neither secret configured, the job verifies
+public access to the exact pinned image. Incomplete credentials fail explicitly.
+The job signs out after authenticated use and retains `drowsy-dragon-evidence`
+plus the `drowsy-dragon-container` image/Dockerfile artifact. It has no Azure
+credentials or deployment step. Azure deployment remains separately approved.
 
 ## Cleanup and limitations
 

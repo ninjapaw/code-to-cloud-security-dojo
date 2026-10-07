@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       drowsy-dragon:
-        description: Build and scan Drowsy Dragon (protected environment credentials required)
+        description: Build and scan Drowsy Dragon on dev (protected environment approval required)
         type: boolean
-        default: false
+        default: true
       nginx-proxy:
         description: Build and scan both original NGINX Proxy modes (no Azure deployment)
         type: boolean
@@ -73,7 +73,7 @@ jobs:
             apps/nginx-proxy/source-lock.json
 
   drowsy-dragon:
-    if: github.ref == 'refs/heads/dev' && github.event_name == 'workflow_dispatch' && inputs.drowsy-dragon
+    if: github.ref == 'refs/heads/dev' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.drowsy-dragon))
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: drowsy-dragon-images
