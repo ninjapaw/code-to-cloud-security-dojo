@@ -73,13 +73,19 @@ known vulnerabilities and fixtures are not evidence of a compromised live accoun
 Do not silently remove lesson code or suppress all upstream findings. Changes to
 the source snapshot require an explicit reviewed pin/import and updated provenance.
 
-CI has no Azure deployment credentials. It records intentional workload findings
-but gates HIGH/CRITICAL findings in the control-portal image. Deployment and paid
-Defender changes require separate operator approval. No detection, prevention,
-compliance outcome or risk reduction is guaranteed by this project.
+Validation CI has no Azure credentials. The automatic publisher uses a separate
+managed identity with registry-scoped `AcrPush` and resource-group `Reader`, not
+application deployment or credential-management permissions. Trusted `dev`
+builds record intentional workload findings but gate HIGH/CRITICAL findings in
+the control-portal image before publishing. Application deployment and paid
+Defender changes still require separate operator approval. No detection,
+prevention, compliance outcome or risk reduction is guaranteed by this project.
 
-Drowsy Dragon's optional CI scan uses DHI registry secrets only on explicit
-manual dispatch. Never forward those credentials into an image or Azure runtime;
+Drowsy Dragon's CI scan uses DHI registry credentials on trusted `dev` pushes
+and enabled manual `dev` runs, never on pull requests or other branches.
+Image-only environments are dev-restricted and run without required reviewers;
+the `code-to-cloud-training` deployment environment retains independent review.
+Never forward registry credentials into an image or Azure runtime;
 Azure pulls from the lab ACR using managed identity. Keep its raw scanner
 receipts private, verify digest/hash bindings, and treat missing evidence as
 unknown. Disabling the option does not stop a previously deployed instance or
