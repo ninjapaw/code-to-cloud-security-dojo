@@ -644,17 +644,17 @@ async function main() {
         await prepareAutomaticPortal(config, release, client);
       }
       if (imageReceipts.length) {
-      await updateStatus(
-        "Recording optional image evidence in private Blob storage",
-      );
-      if (values["via-portal"]) {
-        await withPortalSession(config, async (portal) => {
-          for (const receipt of imageReceipts) await portal.publish(receipt);
-        });
-      } else {
-        const store = new BlobEvidenceStore(resourceNames.storage, client.credential);
-        for (const receipt of imageReceipts) await publishImageReceipt(store, receipt);
-      }
+        await updateStatus(
+          "Recording optional image evidence in private Blob storage",
+        );
+        if (values["via-portal"]) {
+          await withPortalSession(config, async (portal) => {
+            for (const receipt of imageReceipts) await portal.publish(receipt);
+          });
+        } else {
+          const store = new BlobEvidenceStore(resourceNames.storage, client.credential);
+          for (const receipt of imageReceipts) await publishImageReceipt(store, receipt);
+        }
       }
       await deployTemplate("main", parameters);
       if (values.automatic) {
