@@ -288,7 +288,9 @@ keeps source aliases below Docker's 128-character tag limit while distinguishing
 rebuilds using the same source base. The full derived manifest hash is also
 retained separately. Existing archive tags are never reassigned to a different
 image. Tag write/delete locks and manifest deletion protection are read back
-before publishing succeeds; latest remains mutable.
+before publishing succeeds; latest remains mutable. Readback tolerates bounded
+ACR metadata propagation, logs every pending check, and still fails if the exact
+digest/protection state is not observed.
 
 Every successful archive has a companion `scan-<full image-manifest hash>-<bundle
 hash prefix>` tag and a full `evidence-sha256-<bundle hash>` tag. This is a

@@ -1,5 +1,6 @@
 import { copyFile, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { names } from "../../shared/config.mjs";
 import { sha256 } from "../../shared/image-evidence.mjs";
 import { run, az } from "./lifecycle.mjs";
@@ -37,6 +38,7 @@ export async function publishImageArchive(config, entry, output, {
   execute = run,
   executeAz = (args, options) => az(config, args, options),
   log = console.log,
+  pause = (attempt) => delay(Math.min(1000 * 2 ** attempt, 8000)),
 } = {}) {
   const resourceNames = names(config);
   const prefix = `${resourceNames.registry}.azurecr.io/${entry.repository}`;
@@ -119,18 +121,33 @@ export async function publishImageArchive(config, entry, output, {
     repositoryExists = true;
     return metadata(`:${tag}`);
   };
+  const verifyProtection = async (check, label) => {
+    let detail;
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const observed = await check();
+      if (observed.ready) return;
+      detail = observed.detail;
+      log(`[archive] ${label} readback pending (${attempt + 1}/6): ${detail}`);
+      if (attempt < 5) await pause(attempt);
+    }
+    throw new Error(`${label} was not verified after bounded readback: ${detail}`);
+  };
   const lockTag = async (tag, digest) => {
     await executeAz([
       "acr", "repository", "update", "--name", resourceNames.registry,
       "--image", `${entry.repository}:${tag}`, "--write-enabled", "false", "--delete-enabled", "false",
     ]);
-    const observed = await executeAz([
-      "acr", "repository", "show", "--name", resourceNames.registry,
-      "--image", `${entry.repository}:${tag}`,
-    ], { json: true });
-    if (observed?.digest !== digest || observed.changeableAttributes?.writeEnabled !== false ||
-        observed.changeableAttributes?.deleteEnabled !== false)
-      throw new Error("ACR archive tag lock was not verified");
+    await verifyProtection(async () => {
+      const observed = await executeAz([
+        "acr", "repository", "show", "--name", resourceNames.registry,
+        "--image", `${entry.repository}:${tag}`,
+      ], { json: true });
+      return {
+        ready: observed?.digest === digest && observed.changeableAttributes?.writeEnabled === false &&
+          observed.changeableAttributes?.deleteEnabled === false,
+        detail: `tag=${tag}; expected digest=${digest}; observed digest=${observed?.digest ?? "missing"}; writeEnabled=${observed?.changeableAttributes?.writeEnabled ?? "missing"}; deleteEnabled=${observed?.changeableAttributes?.deleteEnabled ?? "missing"}`,
+      };
+    }, "ACR archive tag lock");
     log(`[archive] Locked ${prefix}:${tag} -> ${digest}`);
   };
   const protectManifest = async (digest) => {
@@ -138,8 +155,10 @@ export async function publishImageArchive(config, entry, output, {
       "acr", "repository", "update", "--name", resourceNames.registry,
       "--image", `${entry.repository}@${digest}`, "--delete-enabled", "false",
     ]);
-    if (await metadata(`@${digest}`, "changeableAttributes.deleteEnabled") !== false)
-      throw new Error("ACR archive manifest deletion protection was not verified");
+    await verifyProtection(async () => {
+      const observed = await metadata(`@${digest}`, "changeableAttributes.deleteEnabled");
+      return { ready: observed === false, detail: `manifest=${digest}; deleteEnabled=${observed ?? "missing"}` };
+    }, "ACR archive manifest deletion protection");
   };
   const ensureTag = async (localImage, tag, digest) => {
     const existing = await findTag(tag);

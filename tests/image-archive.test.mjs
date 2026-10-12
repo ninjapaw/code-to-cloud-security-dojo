@@ -115,7 +115,7 @@ test("archive collisions and failed lock readbacks never overwrite history or ad
     const lockRegistry = registryFixture(config, builder(lockCalls), { imageId, digest: imageDigest });
     const second = await portalEntry(join(output, "lock"), lockRegistry);
     await assert.rejects(publishImageArchive(config, second, join(output, "lock"), {
-      ...lockRegistry, promoteLatest: true, log: () => {},
+      ...lockRegistry, promoteLatest: true, log: () => {}, pause: async () => {},
       executeAz: async (args, options) => {
         const value = await lockRegistry.executeAz(args, options);
         return args[1] === "repository" && args[2] === "show"
@@ -125,6 +125,35 @@ test("archive collisions and failed lock readbacks never overwrite history or ad
     }), /lock was not verified/);
     assert.equal(lockCalls.some(([command, args]) => command === "docker" && args[0] === "push" && args[1].endsWith(":latest")), false);
     await assert.rejects(readFile(join(output, "lock", "published-image.json")), { code: "ENOENT" });
+  } finally {
+    await rm(output, { recursive: true, force: true });
+  }
+});
+
+test("archive locks tolerate observed metadata propagation but never promote latest until exact readback is protected", async () => {
+  const output = await mkdtemp(join(tmpdir(), "dojo-sha-propagation-"));
+  const registry = registryFixture(config, builder(), { imageId, digest: imageDigest });
+  const delays = [];
+  const logs = [];
+  let delayedReads = 0;
+  try {
+    const entry = await portalEntry(output, registry);
+    const target = `${entry.repository}:sha256-${imageDigest.slice(7)}`;
+    const published = await publishImageArchive(config, entry, output, {
+      ...registry, promoteLatest: true, log: (line) => logs.push(line),
+      pause: async (attempt) => delays.push(attempt),
+      executeAz: async (args, options) => {
+        const result = await registry.executeAz(args, options);
+        if (args[1] === "repository" && args[2] === "show" && args.includes(target) && ++delayedReads < 3)
+          return { ...result, changeableAttributes: { writeEnabled: true, deleteEnabled: true } };
+        return result;
+      },
+    });
+    assert.equal(published.digest, imageDigest);
+    assert.deepEqual(delays, [0, 1]);
+    assert.equal(delayedReads, 3);
+    assert.ok(logs.some((line) => line.includes("readback pending") && line.includes("writeEnabled=true")));
+    assert.equal(registry.tags.get(entry.image).digest, imageDigest);
   } finally {
     await rm(output, { recursive: true, force: true });
   }
