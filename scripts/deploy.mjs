@@ -23,7 +23,9 @@ import { nginxProxy, nginxMode } from "../shared/nginx-proxy.mjs";
 import { publishImageReceipt } from "../shared/receipt-publishing.mjs";
 import { withPortalSession } from "./lib/portal-client.mjs";
 import { buildNginxProxy, readNginxReceipt } from "./lib/nginx-proxy.mjs";
-import { buildDrowsyDragon, publishDrowsyDragonLatest, readDragonReceipt } from "./lib/drowsy-dragon.mjs";
+import { buildDrowsyDragon, readDragonReceipt } from "./lib/drowsy-dragon.mjs";
+import { buildCoreImage } from "./lib/image-build.mjs";
+import { publishLatestImages } from "./lib/latest-images.mjs";
 import { createDeploymentStatus } from "./lib/deployment-status.mjs";
 import {
   automaticContext,
@@ -37,7 +39,6 @@ import {
 import {
   synchronizeSource,
   verifySource,
-  prepareDojoImage,
 } from "./lib/dojo-source.mjs";
 import {
   az,
@@ -423,13 +424,13 @@ async function main() {
     run("docker", ["version"]);
     run("trivy", ["--version"]);
   }
-  const dragonLatestOutput = fileURLToPath(new URL("output/images/drowsy-dragon/latest/", root));
+  const latestOutput = fileURLToPath(new URL("output/images/latest/", root));
   if (action === "refresh-latest") {
-    await updateStatus("Resolving, building and scanning the current upstream Drowsy Dragon image");
-    const latest = await publishDrowsyDragonLatest(config, dragonLatestOutput);
-    console.log(
-      `Published ${latest.image}@${latest.digest} from ${latest.baseImage}. Approved pin and running applications are unchanged.`,
-    );
+    await updateStatus("Resolving, building and scanning the current upstream bases for all hosted latest images");
+    const latest = await publishLatestImages(config, latestOutput);
+    for (const entry of Object.values(latest))
+      console.log(`Published ${entry.image}@${entry.digest}.`);
+    console.log("Approved pins, release manifests and running applications are unchanged.");
     return;
   }
   if (action === "build") {
@@ -437,83 +438,31 @@ async function main() {
       "Verifying pinned source and preparing the image recipe",
     );
     await mkdir(output, { recursive: true });
-    const prepared = await prepareDojoImage(sourceHome, config.source, output);
-    const { contextPath, dockerfile: recipe } = prepared;
     const tag = `training-${Date.now()}`;
     const release = {
       schemaVersion: 1,
       createdAt: new Date().toISOString(),
       codeRevision: run("git", ["rev-parse", "HEAD"]),
       configHash: configHash(config),
-      source: {
-        ...config.source,
-        tree: prepared.manifest.tree,
-        snapshotSha256: prepared.manifest.sha256,
-        files: prepared.manifest.files,
-      },
       images: {},
     };
-    for (const [key, repository, context, dockerfile] of [
-      ["dojo", resourceNames.dojo, contextPath, recipe],
-      [
-        "portal",
-        resourceNames.portal,
-        fileURLToPath(root),
-        "apps/control-portal/Dockerfile",
-      ],
+    for (const [key, repository] of [
+      ["dojo", resourceNames.dojo],
+      ["portal", resourceNames.portal],
     ]) {
       const image = `${resourceNames.registry}.azurecr.io/${repository}:${tag}`;
-      await updateStatus(`Building ${key} image for linux/amd64`);
-      run(
-        "docker",
-        [
-          "build",
-          "--platform",
-          "linux/amd64",
-          "--label",
-          `org.opencontainers.image.source=${key === "dojo" ? config.source.repository.replace(/\.git$/, "") : "https://github.com/ninjapaw/code-to-cloud-security-dojo"}`,
-          "--label",
-          `org.opencontainers.image.revision=${key === "dojo" ? config.source.revision : run("git", ["rev-parse", "HEAD"])}`,
-          ...(key === "portal" ? ["--build-arg", `DOJO_CODE_REVISION=${release.codeRevision}`] : []),
-          "-f",
-          dockerfile,
-          "-t",
-          image,
-          context,
-        ],
-        { inherit: true },
-      );
-      const scanPath = join(output, `${key}-${tag}.sarif`);
-      await updateStatus(`Scanning ${key} image and retaining SARIF evidence`);
-      run(
-        "trivy",
-        [
-          "image",
-          "--format",
-          "sarif",
-          "--output",
-          scanPath,
-          "--severity",
-          "HIGH,CRITICAL",
-          "--exit-code",
-          key === "portal" ? "1" : "0",
-          image,
-        ],
-        { inherit: true },
-      );
-      release.images[key] = {
-        repository,
-        image,
-        imageId: run("docker", [
-          "image",
-          "inspect",
-          image,
-          "--format",
-          "{{.Id}}",
-        ]),
-        scanPath: relative(fileURLToPath(root), scanPath),
-        scanHash: sha(await readFile(scanPath)),
-      };
+      await updateStatus(`Building and scanning the pinned ${key} image for linux/amd64`);
+      const entry = await buildCoreImage(key, image, key === "dojo" ? output : join(output, `portal-${tag}`), {
+        source: config.source, repository,
+      });
+      release.images[key] = entry;
+      if (key === "dojo")
+        release.source = {
+          ...config.source,
+          tree: entry.source.tree,
+          snapshotSha256: entry.source.sha256,
+          files: entry.source.files,
+        };
     }
     if (config.drowsyDragonEnabled) {
       release.images.drowsyDragon = await buildDrowsyDragon(
@@ -570,11 +519,10 @@ async function main() {
       );
     }
     validateRelease(config, release);
-    if (config.drowsyDragonEnabled) {
-      await updateStatus("Publishing the separately scanned upstream-latest Drowsy Dragon image");
-      const latest = await publishDrowsyDragonLatest(config, dragonLatestOutput);
-      console.log(`Published ${latest.image} from ${latest.baseImage}; it is not part of the approved release.`);
-    }
+    await updateStatus("Publishing separately scanned upstream-latest images without changing approved pins");
+    const latest = await publishLatestImages(config, latestOutput);
+    for (const entry of Object.values(latest))
+      console.log(`Published ${entry.image}; it is not part of the approved release.`);
     await updateStatus("Writing the reviewed release manifest");
     await writeFile(
       join(output, "release.json"),

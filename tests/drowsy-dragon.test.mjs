@@ -432,7 +432,7 @@ test("latest resolves the moving upstream tag to a digest without changing the a
     assert.equal(recorded.baseImage, entry.baseImage);
     const release = releaseFixture(config);
     release.images.drowsyDragon = { ...entry, digest };
-    assert.throws(() => validateRelease(config, release), /pinned provenance/);
+    assert.throws(() => validateRelease(config, release), /Latest images/);
     await assert.rejects(readDragonReceipt({ ...entry, digest }), /deployed release/);
 
     const pinned = await buildDrowsyDragon(image.replace(/:latest$/, ":training-test"), join(output, "pinned"), {
@@ -457,7 +457,7 @@ test("latest rejects missing or invalid upstream digests and registry failures b
         latest: true,
         execute: async (command, args) =>
           command === "docker" && args[0] === "buildx" ? manifest : fixture(command, args),
-      }), /JSON|latest Drowsy Dragon base digest/);
+      }), /JSON|latest base image digest/);
       assert.equal(calls.some(([command, args]) => command === "docker" && args[0] === "build"), false);
     }
     const calls = [];

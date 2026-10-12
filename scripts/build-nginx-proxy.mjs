@@ -8,6 +8,7 @@ const { values } = parseArgs({
   options: {
     tag: { type: "string" },
     mode: { type: "string", default: "vulnerable" },
+    latest: { type: "boolean", default: false },
     "check-source": { type: "boolean" },
   },
 });
@@ -16,11 +17,11 @@ try {
   if (values["check-source"]) {
     console.log(JSON.stringify(await verifyNginxSource(), null, 2));
   } else {
-    const image = values.tag || `nginx-proxy:${mode.mode}`;
+    const image = values.tag || `nginx-proxy:${values.latest ? "latest" : mode.mode}`;
     if (!/^[a-z0-9][a-z0-9./:_-]{0,200}$/.test(image))
       throw new Error("Invalid local image tag");
-    const output = fileURLToPath(new URL(`output/images/nginx-proxy/${mode.mode}/`, root));
-    const entry = await buildNginxProxy(image, output, mode.mode);
+    const output = fileURLToPath(new URL(`output/images/nginx-proxy/${mode.mode}/${values.latest ? "latest/" : ""}`, root));
+    const entry = await buildNginxProxy(image, output, mode.mode, { latest: values.latest });
     console.log(`Built and scanned ${entry.image} (${entry.imageId}). Evidence: ${output}. Local only: not pushed or deployed; review actual CVE association.`);
   }
 } catch (error) {

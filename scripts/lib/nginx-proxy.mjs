@@ -13,6 +13,7 @@ import { sha256 } from "../../shared/image-evidence.mjs";
 import { fingerprint } from "./dojo-source.mjs";
 import { captureImageEvidence } from "./image-evidence.mjs";
 import { run } from "./lifecycle.mjs";
+import { imageBaseArguments } from "./image-build.mjs";
 
 const home = fileURLToPath(new URL("apps/nginx-proxy/", root));
 const sourcePath = join(home, "upstream");
@@ -27,17 +28,30 @@ export async function verifyNginxSource(directory = home) {
   return manifest;
 }
 
-export async function buildNginxProxy(image, output, selectedMode, { execute = run, repository = nginxProxy.id } = {}) {
+export async function buildNginxProxy(image, output, selectedMode, { execute = run, repository = nginxProxy.id, latest = false } = {}) {
   const mode = nginxMode(selectedMode);
   const source = await verifyNginxSource();
-  const dockerfile = await readFile(recipePath, "utf8");
+  let dockerfile = await readFile(recipePath, "utf8");
   const sourceLock = await readFile(sourceLockPath, "utf8");
   const sourceRevision = await execute("git", ["rev-parse", "HEAD"]);
   if (!/^[a-f0-9]{40}$/.test(sourceRevision))
     throw new Error("NGINX Proxy requires a Git source revision");
   await mkdir(output, { recursive: true });
+  let buildRecipePath = recipePath;
+  let baseImages;
+  let buildArgs = [];
+  if (latest) {
+    const from = "FROM ${BASE_OS_IMAGE}:${BASE_OS_VERSION}";
+    if (dockerfile.split(from).length !== 2)
+      throw new Error("NGINX Proxy base recipe changed; review the latest build wrapper");
+    dockerfile = `ARG BASE_IMAGE=ubuntu:24.04\n${dockerfile.replace(from, "FROM ${BASE_IMAGE}")}`;
+    ({ baseImages, buildArgs } = await imageBaseArguments(dockerfile, { latest: true, execute }));
+    dockerfile = dockerfile.replace("ARG BASE_IMAGE=ubuntu:24.04", `ARG BASE_IMAGE=${baseImages.BASE_IMAGE}`);
+    buildRecipePath = join(output, "Dockerfile");
+    await writeFile(buildRecipePath, dockerfile);
+  }
   await execute("docker", [
-    "build", "--platform", nginxProxy.platform,
+    "build", "--platform", nginxProxy.platform, ...buildArgs,
     "--build-arg", `NGINX_VERSION=${mode.version}`,
     "--build-arg", `VULNERABILITY_STATUS=${mode.mode}`,
     "--build-arg", "BASE_OS_IMAGE=ubuntu",
@@ -49,7 +63,7 @@ export async function buildNginxProxy(image, output, selectedMode, { execute = r
     "--label", `dojo.upstream.revision=${source.revision}`,
     "--label", `security.repro.version=${mode.version}`,
     "--label", "security.repro.expected_result=Record actual scanner association; detection is not guaranteed",
-    "-f", recipePath, "-t", image, sourcePath,
+    "-f", buildRecipePath, "-t", image, sourcePath,
   ], { inherit: true });
   const { evidence, summary } = await captureImageEvidence(image, output, nginxProxy, { execute });
   validateNginxInventory(summary.packages, mode.mode);
@@ -58,7 +72,10 @@ export async function buildNginxProxy(image, output, selectedMode, { execute = r
     repository,
     image,
     mode: mode.mode,
+    channel: latest ? "latest" : "pinned",
+    ...(baseImages ? { baseImages } : {}),
     sourceRevision,
+    dockerfilePath: buildRecipePath,
     dockerfileHash: sha256(dockerfile),
     sourceLockPath,
     sourceLockHash: sha256(sourceLock),
@@ -73,6 +90,8 @@ export async function buildNginxProxy(image, output, selectedMode, { execute = r
 }
 
 export async function readNginxReceipt(entry) {
+  if (entry.channel === "latest")
+    throw new Error("NGINX Proxy latest comparisons are not approved release receipts");
   await verifyNginxSource();
   const [dockerfile, sourceLock, inventory, scanJson, sarif] = await Promise.all([
     readFile(recipePath, "utf8"),

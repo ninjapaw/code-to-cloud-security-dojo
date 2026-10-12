@@ -93,10 +93,13 @@ operation performs the same latest-only update. Scheduled jobs can be delayed
 by GitHub; the tag represents the upstream digest resolved by the last
 successful run, not an instantaneous Docker Hub webhook.
 
-Latest evidence is retained as `drowsy-dragon-latest-<run-id>` with
-`published-image.json` recording the base and derived ACR digests. A failed
+Latest evidence is retained in the `drowsyDragon/` directory of
+`dojo-latest-images-<run-id>`, alongside separately built WebGoat, portal,
+credential-utility and enabled NGINX images. `published-image.json` records
+the base and derived ACR digests. A failed
 resolution, scan or image-integrity check stops before the push; failed registry
-readback is not reported as verified publication.
+readback is not reported as verified publication. The core images refresh even
+when Drowsy Dragon is disabled; only its DHI login/build is skipped.
 Latest is not added to the approved release manifest, and latest-only refreshes
 cannot run automatic application rollout. An upstream update does not invalidate
 the unchanged approved pin; promoting that update still requires the author to

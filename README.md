@@ -210,28 +210,65 @@ This is deliberate separation of publish and deploy
 permissions, not an auto-approval bot. Each lane has a separate concurrency group
 so a waiting deployment review cannot block an image upload.
 
-### Drowsy Dragon Pinned and Latest Images
+### Pinned and Latest Images
 
-The [Drowsy Dragon Dockerfile](apps/drowsy-dragon/Dockerfile) defaults to its
-author-approved base digest. That pin and the scanned, digest-bound release
-remain unchanged until the author reviews and updates them.
+The owned recipes default to their author-approved bases. Those defaults,
+imported source locks, and scanned, digest-bound infrastructure releases remain
+unchanged until the author reviews and updates them. Separate latest builds
+resolve current compatible base tags through their registries and build/scan
+new images; latest is not merely an alias for an older pinned build.
 
-When Drowsy Dragon is enabled, release builds also resolve the current upstream
-`dhi.io/dotnet:8-sdk` digest and build/scan a separate image before pushing
-`<registry>.azurecr.io/<app-name>:latest`. Latest is not an alias for the older
-pinned build and is never substituted into `release.json` or a running app.
+| Hosted image | Latest base track | What stays reviewed |
+| --- | --- | --- |
+| WebGoat / Dojo | `eclipse-temurin:25-jdk-noble`, for both build and runtime | WebGoat commit, source lock and root-routing overlay |
+| Control portal | `node:24-bookworm-slim` and `gcr.io/distroless/nodejs24-debian13:nonroot` | Portal source and npm lock |
+| Credential utility | The same Node build/runtime tracks as the portal | Worker source, npm lock and guarded bootstrap execution |
+| Drowsy Dragon, when enabled | `dhi.io/dotnet:8-sdk` | Default base pin and sleeping recipe |
+| NGINX Proxy, when enabled | `ubuntu:24.04` | Imported source, selected NGINX package version and lesson mode |
+
+Latest follows these compatible tracks, not an unreviewed major-version upgrade
+or an application source update. NGINX uses an owned generated base override;
+its imported Dockerfile remains byte-for-byte unchanged. The imported desktop
+example is reference-only and is not built or published by this pipeline.
+
+Successful release builds also push these separately scanned latest images
+to `<registry>.azurecr.io/<app-name>:latest`; the utility uses
+`<registry>.azurecr.io/secret-bootstrap:latest`. The core WebGoat, portal and
+utility images are refreshed even when both optional demos are disabled.
+Latest is never substituted into `release.json` or a running app; the release
+validator explicitly rejects latest tags and latest-built images.
 The [deployment workflow](.github/workflows/deploy.yml) refreshes latest every
 six hours at minute 17 UTC and supports manual `refresh-latest` dispatches.
 These refreshes use `code-to-cloud-images` and its registry-scoped writer,
 share the publisher concurrency group, and cannot run automatic rollout.
-Disabled Drowsy Dragon configurations skip the scheduled image update.
+Publishing the utility image never runs it or creates credentials or grants.
 
 The moving tag reflects the upstream digest resolved by the last successful
-run; GitHub schedules may be delayed. The separate
-`drowsy-dragon-latest-<run-id>` artifact retains package/scan evidence and
-`published-image.json` with the actual base and ACR digests. See the
-[pinned/latest guide](apps/drowsy-dragon/README.md#pinned-releases-and-moving-latest)
-for local builds and approval boundaries.
+run; GitHub schedules may be delayed. All selected images finish scanning before
+any latest push. Portal/utility HIGH/CRITICAL findings block publishing;
+intentional training findings are retained for review, not treated as clean.
+The separate `dojo-latest-images-<run-id>` artifact retains one directory per
+component with scan evidence and `published-image.json`, including resolved
+base references and the derived ACR digest. Scan hashes and local image IDs
+are rechecked before pushing; a failed registry readback is not verified publication.
+
+Local latest builds do not push or deploy:
+
+```text
+npm run image:build -- --latest
+npm run image:build:portal -- --latest
+npm run image:build:bootstrap -- --latest
+npm run image:build:dragon -- --latest
+npm run image:build:nginx -- --mode remediated --latest
+```
+
+Omit `--latest` for approved defaults. Node recipes also accept explicit
+`BUILD_IMAGE` and `RUNTIME_IMAGE` Docker build arguments; the generated WebGoat
+recipe accepts `BASE_IMAGE`. Helpers resolve those arguments to exact registry
+digests and record the effective recipe without editing tracked pins.
+See the [WebGoat](apps/dojo/README.md#create-an-image),
+[Drowsy Dragon](apps/drowsy-dragon/README.md#pinned-releases-and-moving-latest) and
+[NGINX](apps/nginx-proxy/README.md#latest-base-comparisons) guides for details.
 
 ### Automatic Dev Rollout
 
@@ -619,7 +656,7 @@ in the ignored release manifest. A changed configuration invalidates that manife
 | [WebGoat runtime](apps/dojo/upstream/Dockerfile) | Input to the [owned recipe generator](scripts/lib/dojo-source.mjs), which pins Java 25, builds the JAR, and produces the Dojo image for App Service on port 8080. |
 | [Drowsy Dragon](apps/drowsy-dragon/Dockerfile) | Pinned SDK image with `sleep infinity`, deployed to no-ingress ACI when enabled; it has no HTTP health endpoint. |
 | [NGINX Proxy](apps/nginx-proxy/upstream/Dockerfile) | Original reviewed training recipe; App Service routes and probes port 80 through NGINX to its Node dashboard on port 3000. Deployed privately when enabled. |
-| [Credential utility](scripts/Dockerfile.secret-bootstrap) | Scanned ACR image run only for private credential bootstrap, then its temporary site/identity/grants are removed. |
+| [Credential utility](scripts/Dockerfile.secret-bootstrap) | Scanned ACR image run only for private credential bootstrap by approved digest, then its temporary site/identity/grants are removed. Hosting `:latest` does not run the worker. |
 | [Upstream desktop example](apps/dojo/upstream/Dockerfile_desktop) | Preserved WebGoat desktop/ZAP example, not an Azure workload and not part of the release. |
 
 Every enabled application image must finish scanning before any push. The release

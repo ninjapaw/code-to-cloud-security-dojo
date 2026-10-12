@@ -69,8 +69,10 @@ test("owned image build retains upstream runtime recipe and fails on recipe drif
   const recipe = imageRecipe(original);
   assert.equal(
     recipe.match(/eclipse-temurin:25-jdk-noble@sha256:[a-f0-9]{64}/g)?.length,
-    2,
+    1,
   );
+  assert.match(recipe, /^ARG BASE_IMAGE=eclipse-temurin:25-jdk-noble@sha256:[a-f0-9]{64}/);
+  assert.equal(recipe.match(/^FROM \$\{BASE_IMAGE\}/gm)?.length, 2);
   assert.match(recipe, /mvnw -B -DskipTests package/);
   assert.ok(recipe.includes("sed -i 's/\\r$//' mvnw"));
   assert.match(recipe, /COPY upstream\/ \./);

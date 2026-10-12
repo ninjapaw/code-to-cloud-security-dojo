@@ -213,7 +213,7 @@ export function imageRecipe(upstreamRecipe) {
     throw new Error(
       "Upstream Dockerfile packaging changed; review the image recipe",
     );
-  return `FROM ${pinnedBase} AS dojo-build\nWORKDIR /src\nCOPY upstream/ .\nCOPY ${rootRedirect} src/main/java/org/owasp/webgoat/container/DojoRootRedirect.java\nRUN sed -i 's/\\r$//' mvnw && chmod +x mvnw && ./mvnw -B -DskipTests package\n${upstreamRecipe.replace(upstreamBase, `FROM ${pinnedBase}`).replace(copy, "COPY --from=dojo-build --chown=webgoat /src/target/webgoat-*.jar")}\nLABEL name="Code to Cloud Security Dojo" org.opencontainers.image.title="Code to Cloud Security Dojo"\n`;
+  return `ARG BASE_IMAGE=${pinnedBase}\nFROM \${BASE_IMAGE} AS dojo-build\nWORKDIR /src\nCOPY upstream/ .\nCOPY ${rootRedirect} src/main/java/org/owasp/webgoat/container/DojoRootRedirect.java\nRUN sed -i 's/\\r$//' mvnw && chmod +x mvnw && ./mvnw -B -DskipTests package\n${upstreamRecipe.replace(upstreamBase, "FROM ${BASE_IMAGE}").replace(copy, "COPY --from=dojo-build --chown=webgoat /src/target/webgoat-*.jar")}\nLABEL name="Code to Cloud Security Dojo" org.opencontainers.image.title="Code to Cloud Security Dojo"\n`;
 }
 
 export async function prepareDojoImage(home, source, output) {

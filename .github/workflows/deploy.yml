@@ -146,7 +146,6 @@ jobs:
           base_image="$(node --input-type=module -e 'import { drowsyDragon } from "./shared/drowsy-dragon.mjs"; console.log(process.env.OPERATION === "refresh-latest" ? drowsyDragon.baseImage.split("@")[0] : drowsyDragon.baseImage)')"
           docker pull --platform linux/amd64 "$base_image"
       - name: Sign in to Azure with GitHub OIDC
-        if: env.OPERATION != 'refresh-latest' || steps.configuration.outputs.drowsy-dragon == 'true'
         uses: azure/login@eec3c95657c1536435858eda1f3ff5437fee8474 # v2.3.0
         with:
           client-id: ${{ inputs.operation == 'protection' && env.AZURE_PROTECTION_CLIENT_ID || env.AZURE_CLIENT_ID }}
@@ -201,7 +200,6 @@ jobs:
               exit 1
             }
       - name: Execute guarded lifecycle operation
-        if: env.OPERATION != 'refresh-latest' || steps.configuration.outputs.drowsy-dragon == 'true'
         env:
           ACCEPT_COSTS: ${{ inputs.accept-costs }}
           RELEASE_RUN_ID: ${{ inputs.release-run-id }}
@@ -259,11 +257,11 @@ jobs:
               ;;
           esac
       - name: Retain separately published latest image evidence
-        if: always() && (env.OPERATION == 'build' || env.OPERATION == 'refresh-latest') && steps.configuration.outputs.drowsy-dragon == 'true'
+        if: always() && (env.OPERATION == 'build' || env.OPERATION == 'refresh-latest')
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: drowsy-dragon-latest-${{ github.run_id }}
-          path: output/images/drowsy-dragon/latest/
+          name: dojo-latest-images-${{ github.run_id }}
+          path: output/images/latest/
           if-no-files-found: warn
           retention-days: 90
       - name: Export the scanned release images and Dockerfiles

@@ -235,6 +235,8 @@ export function validateRelease(config, release) {
       !/^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/.test(entry.image.slice(prefix.length))
     )
       throw new Error(`Image repository must match the deployed app name: ${image}`);
+    if (entry.channel === "latest" || entry.image.slice(prefix.length).toLowerCase() === "latest")
+      throw new Error("Latest images cannot be used in an approved infrastructure release");
   }
   if (config.drowsyDragonEnabled) {
     const entry = release.images.drowsyDragon;

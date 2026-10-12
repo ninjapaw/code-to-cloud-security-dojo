@@ -345,6 +345,21 @@ test("both optional demos can be planned offline without tools or Azure writes",
   }
 });
 
+test("infrastructure releases reject latest tags and latest-built images even with a renamed tag", () => {
+  const selected = { ...base, drowsyDragonEnabled: true, nginxProxyEnabled: true };
+  const resourceNames = names(selected);
+  for (const key of ["dojo", "portal", "drowsyDragon", "nginxProxy"]) {
+    for (const tag of ["latest", "LATEST"]) {
+      const release = releaseFixture(selected);
+      release.images[key].image = `${resourceNames.registry}.azurecr.io/${resourceNames[key]}:${tag}`;
+      assert.throws(() => validateRelease(selected, release), /Latest images cannot be used/);
+    }
+    const renamed = releaseFixture(selected);
+    renamed.images[key].channel = "latest";
+    assert.throws(() => validateRelease(selected, renamed), /Latest images cannot be used/);
+  }
+});
+
 test("NGINX receipts distinguish package inventory, target association and incomplete/tampered evidence", () => {
   for (const mode of ["vulnerable", "remediated"]) {
     const receipt = receiptFixture(mode);
@@ -427,6 +442,8 @@ test("both build modes preserve upstream source and capture isolated inventory/f
         ([command, args]) => command === "docker" && args[0] === "build",
       )[1];
       assert.ok(build.includes(`NGINX_VERSION=${nginxMode(mode).version}`));
+      assert.equal(build.includes("--pull"), false);
+      assert.equal(calls.some(([command, args]) => command === "docker" && args[0] === "buildx"), false);
       assert.ok(build.includes(`VULNERABILITY_STATUS=${mode}`));
       assert.ok(
         build.includes(`security.repro.version=${nginxMode(mode).version}`),
@@ -453,6 +470,50 @@ test("both build modes preserve upstream source and capture isolated inventory/f
     }
   } finally {
     await rm(temp, { recursive: true, force: true });
+  }
+});
+
+test("NGINX latest resolves its base in an owned wrapper without changing either imported mode", async () => {
+  const output = await mkdtemp(join(tmpdir(), "dojo-nginx-latest-"));
+  const upstreamDigest = `sha256:${"d".repeat(64)}`;
+  try {
+    for (const mode of ["vulnerable", "remediated"]) {
+      const calls = [];
+      const execute = async (command, args) => {
+        calls.push([command, args]);
+        if (command === "git") return "c".repeat(40);
+        if (command === "docker" && args[0] === "buildx")
+          return JSON.stringify({ digest: upstreamDigest });
+        if (command === "docker" && args[0] === "image") return imageId;
+        if (command === "docker" && args[0] === "run")
+          return receiptFixture(mode).artifacts.inventory.trimEnd();
+        if (command === "trivy")
+          await writeFile(args[args.indexOf("--output") + 1], args[0] === "image" ? JSON.stringify(scanFixture(mode)) : "{}");
+        return "";
+      };
+      const entry = await buildNginxProxy("nginx-proxy:latest", join(output, mode), mode, {
+        latest: true, execute,
+      });
+      assert.equal(entry.channel, "latest");
+      assert.equal(entry.baseImages.BASE_IMAGE, `ubuntu:24.04@${upstreamDigest}`);
+      assert.deepEqual(calls.find(([command, args]) => command === "docker" && args[0] === "buildx")[1], [
+        "buildx", "imagetools", "inspect", "ubuntu:24.04", "--format", "{{json .Manifest}}",
+      ]);
+      const build = calls.find(([command, args]) => command === "docker" && args[0] === "build")[1];
+      assert.ok(build.includes("--pull"));
+      assert.ok(build.includes(`BASE_IMAGE=ubuntu:24.04@${upstreamDigest}`));
+      assert.ok(build.includes(`NGINX_VERSION=${nginxMode(mode).version}`));
+      assert.ok(build.includes(`VULNERABILITY_STATUS=${mode}`));
+      assert.equal(build[build.indexOf("-f") + 1], entry.dockerfilePath);
+      assert.match(await readFile(entry.dockerfilePath, "utf8"), /^ARG BASE_IMAGE=ubuntu:24\.04@sha256:[a-f0-9]{64}/);
+      assert.notEqual(entry.dockerfileHash, nginxProxy.dockerfileHash);
+      await assert.rejects(readNginxReceipt({ ...entry, digest }), /not approved release receipts/);
+    }
+    assert.equal(await readFile(join(home, "upstream", "Dockerfile"), "utf8"), recipe);
+    assert.equal(await readFile(join(home, "source-lock.json"), "utf8"), sourceLock);
+    await verifyNginxSource();
+  } finally {
+    await rm(output, { recursive: true, force: true });
   }
 });
 

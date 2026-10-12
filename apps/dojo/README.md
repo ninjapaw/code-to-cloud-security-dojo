@@ -61,6 +61,27 @@ generates the recipe/context metadata without Docker. Build receipts under ignor
 output record the image ID and imported source lock. Local builds are explicitly
 unscanned and never push, deploy or enable paid services.
 
+For a separately scanned comparison using the current compatible Java base:
+
+```text
+npm run image:build -- --latest
+```
+
+This builds `dojo:latest` after resolving `eclipse-temurin:25-jdk-noble` to its
+current registry digest. The same resolved `BASE_IMAGE` is used in both stages
+with `--pull`. WebGoat source, the source lock, and the root-routing overlay
+stay unchanged. Effective Dockerfile, base reference, image ID and SARIF are
+recorded separately under `output/images/<source-revision>/latest/`.
+Latest builds require Buildx and Trivy; ordinary local builds retain their
+existing unscanned behavior. `--latest` cannot be combined with `--prepare-only`,
+which generates the approved default template without registry access.
+
+The [latest publishing workflow](../../README.md#pinned-and-latest-images)
+hosts a separately scanned latest image in ACR on successful `dev` builds,
+scheduled refreshes and manual `refresh-latest` operations. It never changes
+the approved Java digest or deploys latest. The imported desktop/ZAP recipe
+is preserved reference material, not a supported image lane.
+
 ## Publish and Deploy
 
 The [foundation IaC](../../infra/foundation.bicep) provisions an environment-owned

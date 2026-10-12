@@ -58,6 +58,29 @@ ignored `output/images/nginx-proxy/<mode>/` directory. The UI focuses on NGINX
 findings while retaining the total image finding count. Scanner errors, missing
 package coverage, source changes and inventory/version mismatches stop the build.
 
+## Latest Base Comparisons
+
+```text
+npm run image:build:nginx -- --mode vulnerable --latest
+npm run image:build:nginx -- --mode remediated --latest --tag nginx-proxy:remediated-latest
+```
+
+The default latest tag is `nginx-proxy:latest`; select a different local tag to
+retain both comparisons. The helper resolves the current `ubuntu:24.04` registry
+digest and uses it in an owned generated Dockerfile with `--pull`. It does not
+edit the imported Dockerfile or source lock, and keeps the requested NGINX
+package/version and map configuration unchanged. Latest describes the fresh base
+build, not proof of remediation or an automatic NGINX version upgrade.
+
+Effective Dockerfile, base digest, package inventory and full-image scans go to
+`output/images/nginx-proxy/<mode>/latest/`, separately from approved-mode evidence.
+Latest-built images cannot be reused as approved release receipts.
+
+When this demo is enabled, the [latest publishing workflow](../../README.md#pinned-and-latest-images)
+also publishes the configured mode to the app-named ACR repository as `:latest`
+on successful `dev` builds and six-hour/manual refreshes. Infrastructure still
+deploys only the reviewed, digest-bound mode from its release manifest.
+
 ## Opt in alongside Drowsy Dragon
 
 Use `npm run manage` and choose NGINX Proxy and its mode during configuration.

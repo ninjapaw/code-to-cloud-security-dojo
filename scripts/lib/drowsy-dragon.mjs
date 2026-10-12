@@ -8,8 +8,9 @@ import {
   sha256,
   summarizeDragonReceipt,
 } from "../../shared/drowsy-dragon.mjs";
-import { run, az } from "./lifecycle.mjs";
+import { run } from "./lifecycle.mjs";
 import { captureImageEvidence } from "./image-evidence.mjs";
+import { resolveLatestBaseImage, publishLatestImage } from "./image-build.mjs";
 
 const home = fileURLToPath(new URL("apps/drowsy-dragon/", root));
 const recipePath = join(home, "Dockerfile");
@@ -22,16 +23,7 @@ export async function buildDrowsyDragon(image, output, { execute = run, reposito
   if (!/^[a-f0-9]{40}$/.test(sourceRevision))
     throw new Error("Drowsy Dragon requires a Git source revision");
   let baseImage = drowsyDragon.baseImage;
-  if (latest) {
-    const source = baseImage.split("@")[0];
-    const manifest = JSON.parse(await execute("docker", [
-      "buildx", "imagetools", "inspect", source,
-      "--format", "{{json .Manifest}}",
-    ]));
-    if (!/^sha256:[a-f0-9]{64}$/.test(manifest?.digest || ""))
-      throw new Error("Docker did not return a valid latest Drowsy Dragon base digest");
-    baseImage = `${source}@${manifest.digest}`;
-  }
+  if (latest) baseImage = await resolveLatestBaseImage(baseImage, { execute });
   await mkdir(output, { recursive: true });
   await execute(
     "docker",
@@ -54,6 +46,8 @@ export async function buildDrowsyDragon(image, output, { execute = run, reposito
     ...evidence,
     sourceRevision,
     baseImage,
+    channel: latest ? "latest" : "pinned",
+    dockerfilePath: recipePath,
     dockerfileHash: sha256(dockerfile),
   };
   await writeFile(
@@ -63,35 +57,16 @@ export async function buildDrowsyDragon(image, output, { execute = run, reposito
   return entry;
 }
 
-export async function publishDrowsyDragonLatest(config, output, {
-  execute = run,
-  executeAz = (args, options) => az(config, args, options),
-} = {}) {
+export async function publishDrowsyDragonLatest(config, output, options = {}) {
   if (config.drowsyDragonEnabled !== true)
     throw new Error("Drowsy Dragon is not enabled for latest image publishing");
   const resourceNames = names(config);
   const entry = await buildDrowsyDragon(
     `${resourceNames.registry}.azurecr.io/${resourceNames.drowsyDragon}:latest`,
     output,
-    { execute, repository: resourceNames.drowsyDragon, latest: true },
+    { ...options, repository: resourceNames.drowsyDragon, latest: true },
   );
-  if (await execute("docker", [
-    "image", "inspect", entry.image, "--format", "{{.Id}}",
-  ]) !== entry.imageId)
-    throw new Error("Drowsy Dragon latest image changed after scanning; rebuild before pushing");
-  await executeAz(["acr", "login", "--name", resourceNames.registry]);
-  await execute("docker", ["push", entry.image], { inherit: true });
-  entry.digest = await executeAz([
-    "acr", "manifest", "show-metadata", "--registry", resourceNames.registry,
-    "--name", `${entry.repository}:latest`, "--query", "digest",
-  ], { json: true });
-  if (!/^sha256:[a-f0-9]{64}$/.test(entry.digest || ""))
-    throw new Error("ACR did not return a valid Drowsy Dragon latest image digest");
-  await writeFile(
-    join(output, "published-image.json"),
-    JSON.stringify({ ...entry, stage: "published-latest" }, null, 2),
-  );
-  return entry;
+  return publishLatestImage(config, entry, output, options);
 }
 
 export async function readDragonReceipt(entry) {

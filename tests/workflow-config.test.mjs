@@ -209,18 +209,19 @@ test("automatic rollout depends on the same successful build, is dev-only, and a
   assert.match(rollout, /await updateRunnerAccess\(config, new AzureClient\(config\), false\)/);
   assert.doesNotMatch(rollout, /protection --|deprovision|provision --|rotate|pending_deployments/);
 });
-test("latest refreshes are scheduled, opt-in and separate from approved release artifacts", async () => {
+test("latest refreshes are scheduled for the core images even without optional demos and remain separate from releases", async () => {
   const workflow = await readFile(
     new URL("../.github/workflows/deploy.yml", import.meta.url), "utf8",
   );
   assert.match(workflow, /schedule:\r?\n    - cron: "17 \*\/6 \* \* \*"/);
   assert.match(workflow, /- refresh-latest/);
-  assert.match(workflow, /if: env\.OPERATION != 'refresh-latest' \|\| steps\.configuration\.outputs\.drowsy-dragon == 'true'/);
+  assert.doesNotMatch(workflow, /if: env\.OPERATION != 'refresh-latest' \|\| steps\.configuration\.outputs\.drowsy-dragon/);
   assert.match(workflow, /process\.env\.OPERATION === "refresh-latest" \? drowsyDragon\.baseImage\.split\("@"\)\[0\] : drowsyDragon\.baseImage/);
   assert.match(workflow, /refresh-latest\)\r?\n\s+node scripts\/deploy\.mjs refresh-latest/);
   assert.match(workflow, /--confirm "refresh-latest:\$DOJO_SUBSCRIPTION_ID:\$DOJO_RESOURCE_GROUP"/);
-  assert.match(workflow, /name: drowsy-dragon-latest-\$\{\{ github\.run_id \}\}/);
-  assert.match(workflow, /path: output\/images\/drowsy-dragon\/latest\//);
+  assert.match(workflow, /name: dojo-latest-images-\$\{\{ github\.run_id \}\}/);
+  assert.match(workflow, /path: output\/images\/latest\//);
+  assert.match(workflow, /name: Retain separately published latest image evidence\r?\n\s+if: always\(\) && \(env\.OPERATION == 'build' \|\| env\.OPERATION == 'refresh-latest'\)\r?\n/);
   assert.match(workflow, /name: Export the scanned release images and Dockerfiles\r?\n\s+if: success\(\) && env\.OPERATION == 'build'/);
   assert.match(workflow, /name: Record build workflow provenance\r?\n\s+if: success\(\) && env\.OPERATION == 'build'/);
 });
