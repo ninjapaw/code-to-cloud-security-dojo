@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { appendFile, readFile, writeFile, mkdir } from "node:fs/promises";
 import { resolve, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -26,6 +26,7 @@ import { buildNginxProxy, readNginxReceipt } from "./lib/nginx-proxy.mjs";
 import { buildDrowsyDragon, readDragonReceipt } from "./lib/drowsy-dragon.mjs";
 import { buildCoreImage } from "./lib/image-build.mjs";
 import { publishLatestImages } from "./lib/latest-images.mjs";
+import { imageArchiveSummary } from "./lib/image-archive.mjs";
 import { createDeploymentStatus } from "./lib/deployment-status.mjs";
 import {
   automaticContext,
@@ -428,8 +429,11 @@ async function main() {
   if (action === "refresh-latest") {
     await updateStatus("Resolving, building and scanning the current upstream bases for all hosted latest images");
     const latest = await publishLatestImages(config, latestOutput);
-    for (const entry of Object.values(latest))
+    for (const entry of Object.values(latest)) {
       console.log(`Published ${entry.image}@${entry.digest}.`);
+      if (process.env.GITHUB_STEP_SUMMARY)
+        await appendFile(process.env.GITHUB_STEP_SUMMARY, imageArchiveSummary(entry));
+    }
     console.log("Approved pins, release manifests and running applications are unchanged.");
     return;
   }
@@ -521,8 +525,11 @@ async function main() {
     validateRelease(config, release);
     await updateStatus("Publishing separately scanned upstream-latest images without changing approved pins");
     const latest = await publishLatestImages(config, latestOutput);
-    for (const entry of Object.values(latest))
+    for (const entry of Object.values(latest)) {
       console.log(`Published ${entry.image}; it is not part of the approved release.`);
+      if (process.env.GITHUB_STEP_SUMMARY)
+        await appendFile(process.env.GITHUB_STEP_SUMMARY, imageArchiveSummary(entry));
+    }
     await updateStatus("Writing the reviewed release manifest");
     await writeFile(
       join(output, "release.json"),

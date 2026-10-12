@@ -26,6 +26,7 @@ import {
 } from "../scripts/lib/lifecycle.mjs";
 import { collectReport, emptyReport, reportHtml } from "../shared/report.mjs";
 import { MemoryEvidenceStore } from "../shared/evidence-store.mjs";
+import { registryFixture } from "./fixtures/image-registry.mjs";
 
 const base = JSON.parse(
   await readFile(new URL("../config/deploy.config.json", import.meta.url)),
@@ -433,7 +434,7 @@ test("latest resolves the moving upstream tag to a digest without changing the a
     const release = releaseFixture(config);
     release.images.drowsyDragon = { ...entry, digest };
     assert.throws(() => validateRelease(config, release), /Latest images/);
-    await assert.rejects(readDragonReceipt({ ...entry, digest }), /deployed release/);
+    await assert.rejects(readDragonReceipt({ ...entry, digest }), /not approved release/);
 
     const pinned = await buildDrowsyDragon(image.replace(/:latest$/, ":training-test"), join(output, "pinned"), {
       execute: buildExecutor(), repository: resourceNames.drowsyDragon,
@@ -484,14 +485,11 @@ test("latest publishing follows upstream digest updates, always pushes latest, a
   const approvedRecipe = await readFile(recipePath, "utf8");
   const approvedBase = drowsyDragon.baseImage;
   const resourceNames = names(config);
-  const executeAz = async (args, options) => {
-    azureCalls.push([args, options]);
-    return args.includes("show-metadata") ? digest : "";
-  };
   try {
     for (const baseDigest of [upstreamDigest, `sha256:${"e".repeat(64)}`, `sha256:${"e".repeat(64)}`]) {
+      const registry = registryFixture(config, buildExecutor(calls, baseDigest), { imageId, digest, azureCalls });
       const entry = await publishDrowsyDragonLatest(config, output, {
-        execute: buildExecutor(calls, baseDigest), executeAz,
+        ...registry, log: () => {},
       });
       assert.equal(entry.image, `${resourceNames.registry}.azurecr.io/${resourceNames.drowsyDragon}:latest`);
       assert.equal(entry.digest, digest);
@@ -501,15 +499,15 @@ test("latest publishing follows upstream digest updates, always pushes latest, a
       assert.equal(recorded.baseImage, entry.baseImage);
       assert.equal(recorded.digest, digest);
     }
-    const pushes = calls.filter(([command, args]) => command === "docker" && args[0] === "push");
+    const pushes = calls.filter(([command, args]) => command === "docker" && args[0] === "push" && args[1].endsWith(":latest"));
     assert.equal(pushes.length, 3);
     assert.ok(pushes.every(([, args]) => args[1].endsWith(":latest")));
-    assert.equal(calls.some(([command, args]) => command === "docker" && args[0] === "tag"), false);
+    assert.ok(calls.some(([command, args]) => command === "docker" && args[0] === "push" && args[1].includes(":base-sha256-")));
     assert.deepEqual(azureCalls[0][0], ["acr", "login", "--name", resourceNames.registry]);
-    assert.deepEqual(azureCalls[1], [[
+    assert.ok(azureCalls.some(([args, options]) => JSON.stringify([args, options]) === JSON.stringify([[
       "acr", "manifest", "show-metadata", "--registry", resourceNames.registry,
       "--name", `${resourceNames.drowsyDragon}:latest`, "--query", "digest",
-    ], { json: true }]);
+    ], { json: true }])));
     assert.equal(drowsyDragon.baseImage, approvedBase);
     assert.equal(await readFile(recipePath, "utf8"), approvedRecipe);
   } finally {
@@ -551,9 +549,11 @@ test("latest publishing refuses disabled demos, failed scans, changed images and
     }), /image changed after scanning/);
     assert.equal(changedCalls.some(([command, args]) => command === "docker" && args[0] === "push"), false);
 
+    const invalidRegistry = registryFixture(config, buildExecutor());
     await assert.rejects(publishDrowsyDragonLatest(config, join(output, "unverified"), {
-      execute: buildExecutor(),
-      executeAz: async (args) => args.includes("show-metadata") ? "invalid-digest" : "",
+      execute: invalidRegistry.execute,
+      executeAz: async (args, options) => args.includes("show-metadata") && args.includes("digest")
+        ? "invalid-digest" : invalidRegistry.executeAz(args, options),
     }), /ACR did not return a valid/);
     await assert.rejects(readFile(join(output, "unverified", "published-image.json")), { code: "ENOENT" });
   } finally {

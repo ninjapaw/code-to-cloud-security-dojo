@@ -28,7 +28,14 @@ export async function verifyNginxSource(directory = home) {
   return manifest;
 }
 
-export async function buildNginxProxy(image, output, selectedMode, { execute = run, repository = nginxProxy.id, latest = false } = {}) {
+export function nginxLatestRecipe(dockerfile) {
+  const from = "FROM ${BASE_OS_IMAGE}:${BASE_OS_VERSION}";
+  if (dockerfile.split(from).length !== 2)
+    throw new Error("NGINX Proxy base recipe changed; review the latest build wrapper");
+  return `ARG BASE_IMAGE=ubuntu:24.04\n${dockerfile.replace(from, "FROM ${BASE_IMAGE}")}`;
+}
+
+export async function buildNginxProxy(image, output, selectedMode, { execute = run, repository = nginxProxy.id, latest = false, baseOverrides = {}, log = console.log } = {}) {
   const mode = nginxMode(selectedMode);
   const source = await verifyNginxSource();
   let dockerfile = await readFile(recipePath, "utf8");
@@ -40,12 +47,10 @@ export async function buildNginxProxy(image, output, selectedMode, { execute = r
   let buildRecipePath = recipePath;
   let baseImages;
   let buildArgs = [];
-  if (latest) {
-    const from = "FROM ${BASE_OS_IMAGE}:${BASE_OS_VERSION}";
-    if (dockerfile.split(from).length !== 2)
-      throw new Error("NGINX Proxy base recipe changed; review the latest build wrapper");
-    dockerfile = `ARG BASE_IMAGE=ubuntu:24.04\n${dockerfile.replace(from, "FROM ${BASE_IMAGE}")}`;
-    ({ baseImages, buildArgs } = await imageBaseArguments(dockerfile, { latest: true, execute }));
+  const modified = latest || Object.keys(baseOverrides).length > 0;
+  if (modified) {
+    dockerfile = nginxLatestRecipe(dockerfile);
+    ({ baseImages, buildArgs } = await imageBaseArguments(dockerfile, { latest, baseOverrides, execute, log }));
     dockerfile = dockerfile.replace("ARG BASE_IMAGE=ubuntu:24.04", `ARG BASE_IMAGE=${baseImages.BASE_IMAGE}`);
     buildRecipePath = join(output, "Dockerfile");
     await writeFile(buildRecipePath, dockerfile);
@@ -72,7 +77,7 @@ export async function buildNginxProxy(image, output, selectedMode, { execute = r
     repository,
     image,
     mode: mode.mode,
-    channel: latest ? "latest" : "pinned",
+    channel: Object.keys(baseOverrides).length ? "test" : latest ? "latest" : "pinned",
     ...(baseImages ? { baseImages } : {}),
     sourceRevision,
     dockerfilePath: buildRecipePath,
@@ -86,11 +91,12 @@ export async function buildNginxProxy(image, output, selectedMode, { execute = r
     join(output, "local-image.json"),
     JSON.stringify({ ...entry, stage: "local-build-scanned", upstream: source, ...summary }, null, 2),
   );
+  log(`[hash] Built ${image}; channel=${entry.channel}; image ID=${entry.imageId}; scan SHA256=${entry.scanHash}; NGINX mode=${mode.mode}, version=${mode.version}`);
   return entry;
 }
 
 export async function readNginxReceipt(entry) {
-  if (entry.channel === "latest")
+  if (["latest", "test"].includes(entry.channel))
     throw new Error("NGINX Proxy latest comparisons are not approved release receipts");
   await verifyNginxSource();
   const [dockerfile, sourceLock, inventory, scanJson, sarif] = await Promise.all([

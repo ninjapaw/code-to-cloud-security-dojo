@@ -11,6 +11,7 @@ import { imageBaseArguments, buildCoreImage, publishLatestImage, resolveLatestBa
 import { publishLatestImages } from "../scripts/lib/latest-images.mjs";
 import { verifySource } from "../scripts/lib/dojo-source.mjs";
 import { verifyNginxSource } from "../scripts/lib/nginx-proxy.mjs";
+import { registryFixture } from "./fixtures/image-registry.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const base = JSON.parse(await readFile(join(root, "config", "deploy.config.json"), "utf8"));
@@ -139,17 +140,14 @@ test("latest publication scans every selected image before pushing and works wit
       const selected = { ...config, drowsyDragonEnabled: enabled, nginxProxyEnabled: enabled, nginxProxyMode: "remediated" };
       const calls = [];
       const azureCalls = [];
+      const registry = registryFixture(selected, executor(calls, selected), { imageId, digest: registryDigest, azureCalls });
       const images = await publishLatestImages(selected, join(output, String(enabled)), {
-        execute: executor(calls, selected),
-        executeAz: async (args) => {
-          azureCalls.push(args);
-          return args.includes("show-metadata") ? registryDigest : "";
-        },
+        ...registry, log: () => {},
       });
       assert.deepEqual(Object.keys(images), [
         "dojo", "portal", "secretBootstrap", ...(enabled ? ["drowsyDragon", "nginxProxy"] : []),
       ]);
-      const pushes = calls.filter(([command, args]) => command === "docker" && args[0] === "push");
+      const pushes = calls.filter(([command, args]) => command === "docker" && args[0] === "push" && args[1].endsWith(":latest"));
       assert.deepEqual(pushes.map(([, args]) => args[1]), Object.values(images).map((entry) => entry.image));
       const firstPush = calls.findIndex(([command, args]) => command === "docker" && args[0] === "push");
       const lastScan = calls.findLastIndex(([command]) => command === "trivy");
@@ -163,8 +161,8 @@ test("latest publication scans every selected image before pushing and works wit
         assert.equal(recorded.digest, registryDigest);
       }
       assert.equal(images.secretBootstrap.repository, "secret-bootstrap");
-      assert.ok(azureCalls.every((args) => args[0] === "acr"));
-      assert.equal(azureCalls.filter((args) => args.includes("show-metadata")).length, Object.keys(images).length);
+      assert.ok(azureCalls.every(([args]) => args[0] === "acr"));
+      assert.equal(azureCalls.filter(([args]) => args.includes("show-metadata") && args.includes(`${names(selected).dojo}:latest`)).length, 1);
     }
     assert.equal(drowsyDragon.baseImage, approvedBase);
     await verifyNginxSource();
@@ -182,13 +180,15 @@ test("unchanged and newer upstream digests both publish latest without rewriting
       const entry = await buildCoreImage("portal", `${resourceNames.registry}.azurecr.io/${resourceNames.portal}:latest`, output, {
         latest: true, repository: resourceNames.portal, execute: executor(calls, config, digest),
       });
+      const registry = registryFixture(config, executor(calls), { imageId, digest: registryDigest });
+      registry.local.set(entry.image, { id: imageId, evidence: false });
       const published = await publishLatestImage(config, entry, output, {
-        execute: executor(calls), executeAz: async (args) => args.includes("show-metadata") ? registryDigest : "",
+        ...registry, log: () => {},
       });
       assert.ok(published.baseImages.BUILD_IMAGE.endsWith(`@${digest}`));
       assert.ok(published.baseImages.RUNTIME_IMAGE.endsWith(`@${digest}`));
     }
-    assert.equal(calls.filter(([command, args]) => command === "docker" && args[0] === "push").length, 3);
+    assert.equal(calls.filter(([command, args]) => command === "docker" && args[0] === "push" && args[1].endsWith(":latest")).length, 3);
     assert.equal(await readFile(join(root, "apps", "control-portal", "Dockerfile"), "utf8"), portalRecipe);
   } finally {
     await rm(output, { recursive: true, force: true });
@@ -222,8 +222,12 @@ test("scanner failures, changed scan evidence, moving-tag substitutions and miss
       { ...entry, image: entry.image.replace(resourceNames.registry, "other") },
     ])
       await assert.rejects(publishLatestImage(config, changed, output, publishOptions), /owned repository/);
+    const registry = registryFixture(config, execute, { imageId, digest: registryDigest });
+    registry.local.set(entry.image, { id: imageId, evidence: false });
     await assert.rejects(publishLatestImage(config, entry, output, {
-      execute, executeAz: async (args) => args.includes("show-metadata") ? "invalid" : "",
+      execute: registry.execute,
+      executeAz: async (args, options) => args.includes("show-metadata") && args.includes("digest")
+        ? "invalid" : registry.executeAz(args, options),
     }), /ACR did not return a valid/);
     await assert.rejects(readFile(join(output, "published-image.json")), { code: "ENOENT" });
     await writeFile(entry.scanPath, "tampered");

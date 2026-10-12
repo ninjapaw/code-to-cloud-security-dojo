@@ -54,7 +54,10 @@ There is no promised response SLA or supported production release.
   The session signing key is separate; managed identities and individual WebGoat
   lesson accounts do not receive fabricated shared username/password entries.
 - Keep local configuration, environment files, Azure/SSH state, credential files,
-  scan exports, release receipts and reports out of Git and container build contexts.
+  scan exports, release receipts and reports out of Git and application build contexts.
+  The scoped image publisher may package only validated scanner files and
+  digest-bound metadata into a separate non-runnable evidence data image in the
+  private lab ACR; never include credentials or unrelated workspace files.
 - Review staged files as well as ignore rules. Run `npm run check:public`, a dedicated
   secret/history scanner and dependency checks before publishing.
 - The publication guard scans the working tree, not remote history or archive
@@ -84,6 +87,25 @@ requires exact runtime digests, private health and scan evidence. Paid Defender
 changes, infrastructure expansion and destructive operations remain manual.
 No detection,
 prevention, compliance outcome or risk reduction is guaranteed by this project.
+
+Latest and manually selected SHA builds are comparison artifacts, not approved
+infrastructure releases. Reviewed pins remain author-controlled. The image
+publisher retains full-source-hash aliases, content-addressed image tags and
+associated scan data images with checked ACR tag locks and manifest deletion
+protection. Latest is advanced only after archiving succeeds. A lock is not a
+signature or an immutable trust boundary against an administrator who can
+unlock/delete content. Retained archives incur storage costs and disappear when
+the approved lab registry is retired; export important history before teardown.
+
+The manual hash catalog/test workflow runs only from trusted `dev` under the
+registry-only identity. Inputs accept `latest` or exact SHA256 digests from the
+reviewed source repositories, never arbitrary image URLs or shell commands.
+Manual tests cannot update latest or deploy Azure resources. Optional runtime
+checks use an internal Docker network/loopback or no networking, never receive
+registry/Azure/application credentials, and clean up created IDs. The portal is
+read-only preview; the credential worker is syntax-only and never writes secrets.
+GitHub's native dropdowns are static: hash catalogs offer copy controls and
+authenticated CLI dispatch commands, not an unauthenticated execution portal.
 
 Drowsy Dragon's CI scan uses DHI registry credentials on trusted `dev` pushes
 and enabled manual `dev` runs, never on pull requests or other branches.

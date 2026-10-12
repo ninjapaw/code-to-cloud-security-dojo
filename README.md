@@ -270,6 +270,107 @@ See the [WebGoat](apps/dojo/README.md#create-an-image),
 [Drowsy Dragon](apps/drowsy-dragon/README.md#pinned-releases-and-moving-latest) and
 [NGINX](apps/nginx-proxy/README.md#latest-base-comparisons) guides for details.
 
+### SHA Archives and Manual Image Tests
+
+Before advancing `:latest`, the publisher retains and locks these tags in the
+same ACR repository:
+
+| Tag | Meaning |
+| --- | --- |
+| `image-sha256-<full Docker image-ID hash>` | The local image identity assessed by Trivy |
+| `sha256-<full derived image-manifest hash>` | Content-addressed published image |
+| `base-sha256-<full upstream hash>-<image hash prefix>` | Exact registry/source hash for a single-base recipe |
+| `base-build-sha256-<full upstream hash>-<image hash prefix>` | Node dependency-stage source hash |
+| `base-runtime-sha256-<full upstream hash>-<image hash prefix>` | Node runtime-stage source hash |
+
+The source hash is **not truncated**. The 16-character image-manifest suffix
+keeps source aliases below Docker's 128-character tag limit while distinguishing
+rebuilds using the same source base. The full derived manifest hash is also
+retained separately. Existing archive tags are never reassigned to a different
+image. Tag write/delete locks and manifest deletion protection are read back
+before publishing succeeds; latest remains mutable.
+
+Every successful archive has a companion `scan-<full image-manifest hash>-<bundle
+hash prefix>` tag and a full `evidence-sha256-<bundle hash>` tag. This is a
+non-runnable `FROM scratch` **data image**, not another application or a clean
+security result. Its `/evidence/` directory contains `manifest.json`, the actual
+SARIF, available full scan JSON/package inventory/source lock, and the effective
+Dockerfile. Metadata binds full source hashes, code revision, assessed image ID,
+published manifest, scan time and file hashes. Repeat scans of an unchanged
+image retain separate observations when their evidence differs. Archive and
+scan tags are locked before latest is advanced; failures never silently discard
+the historical pointer or imply a verified publication.
+
+GitHub artifacts remain convenient, time-limited downloads. The companion scan
+images persist in ACR with the image history until explicitly unlocked/removed
+or the approved lab registry/resource group is retired. Retained layers, scans
+and metadata consume billable storage; this workflow never purges them.
+Record/export required archives before lab teardown.
+
+#### Discover and Select a Source SHA
+
+Open the [Container hash catalog and test builds workflow](.github/workflows/image-experiments.yml)
+on `dev`, choose `detect`, select an image or `all`, and confirm the protected
+resource group. Discovery only reads current registry hashes and recent ACR
+archive tags; it does not build, push or run images. The job summary and
+`container-hash-catalog-and-scans-<run-id>` artifact provide:
+
+- `hash-catalog.json` and Markdown: approved, current and archived source hashes;
+- `hash-catalog.html`: per-hash **Copy SHA** and **Copy build command** buttons;
+- links to the native manual workflow.
+
+GitHub's native [manual workflow UI](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow)
+has static dropdowns; it cannot populate newly detected hashes dynamically.
+Download/open the HTML catalog, copy a SHA or its exact GitHub CLI command, then
+dispatch `build-test` for one image. No separate GitHub token, external selector
+service, auto-edited workflow YAML or unsupported prefilled URL is used.
+Catalog history is bounded to 100 recently updated tags per image repository;
+older archives remain available in ACR and exact SHA input is not restricted to
+the visible catalog.
+
+For `build-test`, set `base-sha` to `latest` or a complete lowercase
+`sha256:<64 hex characters>`. For the portal/utility this selects `RUNTIME_IMAGE`;
+their separate `build-sha` input selects `BUILD_IMAGE`. Other images use
+`BASE_IMAGE` and leave `build-sha=latest`. An explicit SHA is verified against
+the same reviewed source repository, never replaced with latest. `latest` is
+resolved again at build time, not frozen to an earlier discovery result.
+
+Manual builds use the registry-only identity and the unchanged reviewed app
+source/NGINX mode. They retain image/scan archives and a downloadable
+`container-hash-test-image-<run-id>` image/Dockerfile/checksum artifact.
+They **never change latest, approved pins, the release manifest or infrastructure**.
+Portal/utility HIGH/CRITICAL scan gates still apply.
+
+The optional `smoke-test` checkbox runs only isolated checks on the Linux runner:
+internal Docker network and loopback-only HTTP for web workloads, read-only
+preview for the portal, and no-network sleeping-state verification for the
+dragon. The credential worker is syntax-only and never executes its Key Vault
+bootstrap. Created container/network IDs are removed after success or failure.
+This is not live Azure validation or a security efficacy claim.
+
+Logs and job summaries show approved defaults, requested selections, resolved
+source hashes, code revision, Docker image ID, derived manifest, scan SHA/time,
+locked archive/scan references, and previous/current latest digests.
+
+```text
+npm run image:experiments -- detect --image all
+gh workflow run image-experiments.yml --repo ninjapaw/code-to-cloud-security-dojo --ref dev -f operation=detect -f image=all -f confirm-resource-group=code-to-cloud-training
+gh workflow run image-experiments.yml --repo ninjapaw/code-to-cloud-security-dojo --ref dev -f operation=build-test -f image=drowsy-dragon -f base-sha=latest -f smoke-test=true -f confirm-resource-group=code-to-cloud-training
+```
+
+To retrieve a recorded scan companion without executing it, pull its recorded
+tag/digest, create a stopped container, copy the data, then remove that container:
+
+```text
+docker create --name scan-reader <recorded-scan-image> /not-run
+docker cp scan-reader:/evidence ./scan-evidence
+docker rm scan-reader
+```
+
+Compare every copied file against `manifest.json` and the recorded bundle
+hashes. Distinguish a Docker config/image-ID hash, upstream registry hash,
+published manifest hash and scan/bundle hash; they are not interchangeable.
+
 ### Automatic Dev Rollout
 
 Set `DOJO_AUTOMATIC_ROLLOUT=true` as both a repository variable (job selection)

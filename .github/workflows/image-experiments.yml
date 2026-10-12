@@ -1,0 +1,161 @@
+name: Container hash catalog and test builds
+run-name: "${{ inputs.operation }}: ${{ inputs.image }} / ${{ inputs['base-sha'] }} by @${{ github.actor }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Detect current/approved/archived hashes, or build and scan one test image
+        type: choice
+        required: true
+        default: detect
+        options: [detect, build-test]
+      image:
+        description: Image family (all is discovery-only)
+        type: choice
+        required: true
+        default: all
+        options: [all, dojo, portal, secret-bootstrap, drowsy-dragon, nginx-proxy]
+      base-sha:
+        description: latest or full sha256 digest from the catalog (runtime/base image)
+        type: string
+        default: latest
+      build-sha:
+        description: latest or full builder sha256 digest (portal/secret-bootstrap only)
+        type: string
+        default: latest
+      smoke-test:
+        description: Isolated runtime checks; credential worker is syntax-only and never writes secrets
+        type: boolean
+        default: false
+      confirm-resource-group:
+        description: Type the configured resource group exactly
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: dojo-images-code-to-cloud-training
+  cancel-in-progress: false
+
+jobs:
+  image-experiment:
+    if: github.ref == 'refs/heads/dev' && github.event_name == 'workflow_dispatch'
+    runs-on: ${{ fromJSON(vars.DOJO_DEPLOY_RUNNER_LABELS || '["ubuntu-latest"]') }}
+    timeout-minutes: 45
+    environment: code-to-cloud-images
+    env:
+      DOJO_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      DOJO_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      DOJO_RESOURCE_GROUP: ${{ vars.DOJO_RESOURCE_GROUP }}
+      DOJO_LOCATION: ${{ vars.DOJO_LOCATION }}
+      DOJO_OPERATOR_OBJECT_ID: ${{ vars.DOJO_OPERATOR_OBJECT_ID }}
+      DOJO_ADMIN_CIDR: ${{ vars.DOJO_ADMIN_CIDR }}
+      DOJO_DROWSY_DRAGON_ENABLED: ${{ vars.DOJO_DROWSY_DRAGON_ENABLED }}
+      DOJO_NGINX_PROXY_ENABLED: ${{ vars.DOJO_NGINX_PROXY_ENABLED }}
+      DOJO_NGINX_PROXY_MODE: ${{ vars.DOJO_NGINX_PROXY_MODE }}
+      DOJO_EVIDENCE_PUBLIC_ACCESS: ${{ vars.DOJO_EVIDENCE_PUBLIC_ACCESS }}
+      TEST_OPERATION: ${{ inputs.operation }}
+      TEST_IMAGE: ${{ inputs.image }}
+      TEST_BASE_SHA: ${{ inputs['base-sha'] }}
+      TEST_BUILD_SHA: ${{ inputs['build-sha'] }}
+      TEST_SMOKE: ${{ inputs['smoke-test'] }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Validate the selected operation and protected target
+        id: configuration
+        env:
+          CONFIRM_RESOURCE_GROUP: ${{ inputs['confirm-resource-group'] }}
+        run: |
+          set -euo pipefail
+          test "$CONFIRM_RESOURCE_GROUP" = "$DOJO_RESOURCE_GROUP" || {
+            echo "Resource-group confirmation does not match the protected publisher." >&2
+            exit 1
+          }
+          case "$TEST_SMOKE" in
+            true|false) ;;
+            *) echo "smoke-test must be true or false" >&2; exit 1 ;;
+          esac
+          config_path="$RUNNER_TEMP/image-experiment.json"
+          node scripts/workflow-config.mjs "$config_path"
+          echo "DOJO_CONFIG=$config_path" >> "$GITHUB_ENV"
+          args=("$TEST_OPERATION" --image "$TEST_IMAGE" --base-sha "$TEST_BASE_SHA" --build-sha "$TEST_BUILD_SHA" --audit)
+          if [[ "$TEST_SMOKE" == "true" ]]; then args+=(--smoke-test); fi
+          DOJO_CONFIG="$config_path" node scripts/image-experiments.mjs "${args[@]}"
+          node --input-type=module <<'NODE' >> "$GITHUB_OUTPUT"
+          import { readFile } from "node:fs/promises";
+          const config = JSON.parse(await readFile(process.env.RUNNER_TEMP + "/image-experiment.json", "utf8"));
+          console.log(`dhi=${process.env.TEST_IMAGE === "drowsy-dragon" || (process.env.TEST_IMAGE === "all" && config.drowsyDragonEnabled === true)}`);
+          NODE
+      - name: Test image and archive guardrails
+        run: npm test
+      - uses: aquasecurity/setup-trivy@e6c2c5e321ed9123bda567646e2f96565e34abe1 # v0.2.4
+        if: inputs.operation == 'build-test'
+        with:
+          version: v0.74.0
+      - name: Authenticate the selected DHI image family
+        if: steps.configuration.outputs.dhi == 'true'
+        id: dhi-login
+        env:
+          DHI_USERNAME: ${{ secrets.DHI_USERNAME }}
+          DHI_TOKEN: ${{ secrets.DHI_TOKEN }}
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$DHI_USERNAME" || -n "$DHI_TOKEN" ]]; then
+            : "${DHI_USERNAME:?Set both DHI credentials in code-to-cloud-images}"
+            : "${DHI_TOKEN:?Set both DHI credentials in code-to-cloud-images}"
+          else
+            : "${DOCKER_USERNAME:?Set DOCKER_USERNAME and DOCKER_TOKEN}"
+            : "${DOCKER_TOKEN:?Set DOCKER_USERNAME and DOCKER_TOKEN}"
+            DHI_USERNAME="$DOCKER_USERNAME"
+            DHI_TOKEN="$DOCKER_TOKEN"
+          fi
+          printf '%s' "$DHI_TOKEN" | docker login dhi.io --username "$DHI_USERNAME" --password-stdin
+          echo "authenticated=true" >> "$GITHUB_OUTPUT"
+      - name: Sign in with the registry-only identity
+        uses: azure/login@eec3c95657c1536435858eda1f3ff5437fee8474 # v2.3.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Detect hashes or build the selected archived test image
+        run: |
+          set -euo pipefail
+          args=("$TEST_OPERATION" --image "$TEST_IMAGE" --base-sha "$TEST_BASE_SHA" --build-sha "$TEST_BUILD_SHA")
+          if [[ "$TEST_SMOKE" == "true" ]]; then args+=(--smoke-test); fi
+          if [[ "$TEST_OPERATION" == "build-test" ]]; then args+=(--confirm "image-test:$DOJO_SUBSCRIPTION_ID:$DOJO_RESOURCE_GROUP"); fi
+          node scripts/image-experiments.mjs "${args[@]}"
+      - name: Retain the detected SHA catalog and test scan evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: container-hash-catalog-and-scans-${{ github.run_id }}
+          path: |
+            output/image-experiments/hash-catalog.*
+            output/image-experiments/build/
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Retain the downloadable selected test image
+        if: success() && inputs.operation == 'build-test'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: container-hash-test-image-${{ github.run_id }}
+          path: output/image-experiments/container/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 7
+      - name: Sign out of the DHI registry
+        if: always() && steps.dhi-login.outputs.authenticated == 'true'
+        run: docker logout dhi.io

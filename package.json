@@ -26,10 +26,11 @@
     "image:build:bootstrap": "node scripts/build-core-image.mjs --component secret-bootstrap",
     "image:build:nginx": "node scripts/build-nginx-proxy.mjs",
     "image:check:nginx": "node scripts/build-nginx-proxy.mjs --check-source",
+    "image:experiments": "node scripts/image-experiments.mjs",
     "doctor": "node scripts/deploy.mjs doctor",
     "start": "node apps/control-portal/server.mjs",
     "preview": "node apps/control-portal/server.mjs --preview",
-    "test:browser": "node --test tests/browser.spec.mjs"
+    "test:browser": "node --test tests/browser.spec.mjs tests/image-catalog.browser.spec.mjs"
   },
   "dependencies": {
     "@azure/identity": "^4.13.3",

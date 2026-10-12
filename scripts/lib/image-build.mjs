@@ -1,24 +1,31 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { root, names } from "../../shared/config.mjs";
+import { root } from "../../shared/config.mjs";
 import { sha256 } from "../../shared/image-evidence.mjs";
 import { prepareDojoImage, verifySource } from "./dojo-source.mjs";
-import { run, az } from "./lifecycle.mjs";
+import { run } from "./lifecycle.mjs";
+import { publishImageArchive } from "./image-archive.mjs";
 
-export async function resolveLatestBaseImage(baseImage, { execute = run } = {}) {
+export async function resolveLatestBaseImage(baseImage, { execute = run, selection = "latest", log = console.log } = {}) {
   const source = baseImage.split("@")[0];
   if (!/^[a-z0-9][a-z0-9./:_-]+$/.test(source) || !source.split("/").at(-1).includes(":"))
     throw new Error("Latest builds require a reviewed tagged base image");
+  if (selection !== "latest" && !/^sha256:[a-f0-9]{64}$/.test(selection))
+    throw new Error("Base selection must be latest or a complete sha256 digest");
+  const reference = selection === "latest" ? source : `${source}@${selection}`;
   const manifest = JSON.parse(await execute("docker", [
-    "buildx", "imagetools", "inspect", source, "--format", "{{json .Manifest}}",
+    "buildx", "imagetools", "inspect", reference, "--format", "{{json .Manifest}}",
   ]));
   if (!/^sha256:[a-f0-9]{64}$/.test(manifest?.digest || ""))
     throw new Error("Docker did not return a valid latest base image digest");
+  if (selection !== "latest" && manifest.digest !== selection)
+    throw new Error("Registry did not return the explicitly selected source digest");
+  log(`[hash] Base track=${source}; approved default=${baseImage}; selection=${selection}; resolved source SHA=${manifest.digest}; platform=linux/amd64`);
   return `${source}@${manifest.digest}`;
 }
 
-export async function imageBaseArguments(recipe, { latest = false, execute = run } = {}) {
+export function imageBaseDefaults(recipe) {
   const argumentsSection = recipe.slice(0, recipe.search(/^FROM\s/m));
   const variables = [...new Set([...recipe.matchAll(/^FROM\s+\$\{([A-Z][A-Z0-9_]*)\}(?:\s+AS\s+[\w-]+)?\r?$/gm)]
     .map((match) => match[1]))];
@@ -29,20 +36,35 @@ export async function imageBaseArguments(recipe, { latest = false, execute = run
     const definitions = [...argumentsSection.matchAll(new RegExp(`^ARG ${variable}=(\\S+)\\r?$`, "gm"))];
     if (definitions.length !== 1)
       throw new Error(`Image recipe requires one approved default for ${variable}`);
-    baseImages[variable] = latest
-      ? await resolveLatestBaseImage(definitions[0][1], { execute })
-      : definitions[0][1];
+    baseImages[variable] = definitions[0][1];
+  }
+  return baseImages;
+}
+
+export async function imageBaseArguments(recipe, { latest = false, baseOverrides = {}, execute = run, log = console.log } = {}) {
+  const defaults = imageBaseDefaults(recipe);
+  if (!baseOverrides || typeof baseOverrides !== "object" || Array.isArray(baseOverrides) ||
+      Object.keys(baseOverrides).some((key) => !Object.hasOwn(defaults, key)) ||
+      Object.values(baseOverrides).some((selection) => selection !== "latest" && !/^sha256:[a-f0-9]{64}$/.test(selection)))
+    throw new Error("Base overrides must select known image arguments with latest or complete SHA256 digests");
+  const modified = latest || Object.keys(baseOverrides).length > 0;
+  const baseImages = {};
+  for (const [variable, approved] of Object.entries(defaults)) {
+    baseImages[variable] = modified
+      ? await resolveLatestBaseImage(approved, { execute, selection: baseOverrides[variable] ?? "latest", log })
+      : approved;
+    if (!modified) log(`[hash] ${variable}: approved base=${approved}; channel=pinned; platform=linux/amd64`);
   }
   return {
     baseImages,
-    buildArgs: latest
+    buildArgs: modified
       ? ["--pull", ...Object.entries(baseImages).flatMap(([key, value]) => ["--build-arg", `${key}=${value}`])]
       : [],
   };
 }
 
 export async function buildCoreImage(component, image, output, {
-  source, latest = false, scan = true, repository = component, execute = run,
+  source, latest = false, baseOverrides = {}, scan = true, repository = component, execute = run, log = console.log,
 } = {}) {
   const directory = fileURLToPath(root);
   let context = directory;
@@ -64,9 +86,10 @@ export async function buildCoreImage(component, image, output, {
   if (!/^[a-f0-9]{40}$/.test(sourceRevision))
     throw new Error("Image build requires a Git source revision");
   let recipe = await readFile(dockerfile, "utf8");
-  const { baseImages, buildArgs } = await imageBaseArguments(recipe, { latest, execute });
+  const { baseImages, buildArgs } = await imageBaseArguments(recipe, { latest, baseOverrides, execute, log });
+  const modified = latest || Object.keys(baseOverrides).length > 0;
   await mkdir(output, { recursive: true });
-  if (latest) {
+  if (modified) {
     for (const [key, value] of Object.entries(baseImages))
       recipe = recipe.replace(new RegExp(`^ARG ${key}=\\S+\\r?$`, "m"), `ARG ${key}=${value}`);
     const ignorePath = `${dockerfile}.dockerignore`;
@@ -90,7 +113,7 @@ export async function buildCoreImage(component, image, output, {
   const entry = {
     schemaVersion: 1,
     repository, image, imageId, sourceRevision,
-    channel: latest ? "latest" : "pinned",
+    channel: Object.keys(baseOverrides).length ? "test" : latest ? "latest" : "pinned",
     baseImages,
     dockerfilePath: dockerfile,
     dockerfileHash: sha256(recipe),
@@ -112,45 +135,10 @@ export async function buildCoreImage(component, image, output, {
   await writeFile(join(output, "local-image.json"), JSON.stringify({
     ...entry, stage: scan ? "local-build-scanned" : "local-build-unscanned",
   }, null, 2));
+  log(`[hash] Built ${image}; channel=${entry.channel}; image ID=${imageId}; code=${sourceRevision}; scan SHA256=${entry.scanHash ?? "not-scanned"}`);
   return entry;
 }
 
-export async function publishLatestImage(config, entry, output, {
-  execute = run,
-  executeAz = (args, options) => az(config, args, options),
-} = {}) {
-  const resourceNames = names(config);
-  if (
-    entry.channel !== "latest" ||
-    ![resourceNames.dojo, resourceNames.portal, resourceNames.drowsyDragon, resourceNames.nginxProxy, "secret-bootstrap"].includes(entry.repository) ||
-    entry.image !== `${resourceNames.registry}.azurecr.io/${entry.repository}:latest`
-  )
-    throw new Error("Latest publication requires an owned repository and an explicitly latest-built image");
-  for (const key of ["scan", "scanJson", "inventory", "dockerfile", "sourceLock"]) {
-    if (key !== "scan" && entry[`${key}Hash`] === undefined) continue;
-    if (
-      !/^[a-f0-9]{64}$/.test(entry[`${key}Hash`] || "") ||
-      typeof entry[`${key}Path`] !== "string" ||
-      sha256(await readFile(entry[`${key}Path`])) !== entry[`${key}Hash`]
-    )
-      throw new Error(`${entry.repository} ${key} evidence changed before latest publication`);
-  }
-  if (await execute("docker", [
-    "image", "inspect", entry.image, "--format", "{{.Id}}",
-  ]) !== entry.imageId)
-    throw new Error(`${entry.repository} image changed after scanning; rebuild before pushing`);
-  await executeAz(["acr", "login", "--name", resourceNames.registry]);
-  await execute("docker", ["push", entry.image], { inherit: true });
-  const digest = await executeAz([
-    "acr", "manifest", "show-metadata", "--registry", resourceNames.registry,
-    "--name", `${entry.repository}:latest`, "--query", "digest",
-  ], { json: true });
-  if (!/^sha256:[a-f0-9]{64}$/.test(digest || ""))
-    throw new Error("ACR did not return a valid latest image digest");
-  const published = { ...entry, digest };
-  await writeFile(
-    join(output, "published-image.json"),
-    JSON.stringify({ ...published, stage: "published-latest" }, null, 2),
-  );
-  return published;
+export async function publishLatestImage(config, entry, output, options = {}) {
+  return publishImageArchive(config, entry, output, { ...options, promoteLatest: true });
 }

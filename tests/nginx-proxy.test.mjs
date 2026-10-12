@@ -345,18 +345,20 @@ test("both optional demos can be planned offline without tools or Azure writes",
   }
 });
 
-test("infrastructure releases reject latest tags and latest-built images even with a renamed tag", () => {
+test("infrastructure releases reject latest tags and latest/test-built images even with a renamed tag", () => {
   const selected = { ...base, drowsyDragonEnabled: true, nginxProxyEnabled: true };
   const resourceNames = names(selected);
   for (const key of ["dojo", "portal", "drowsyDragon", "nginxProxy"]) {
     for (const tag of ["latest", "LATEST"]) {
       const release = releaseFixture(selected);
       release.images[key].image = `${resourceNames.registry}.azurecr.io/${resourceNames[key]}:${tag}`;
-      assert.throws(() => validateRelease(selected, release), /Latest images cannot be used/);
+      assert.throws(() => validateRelease(selected, release), /Latest images.*cannot be used/);
     }
-    const renamed = releaseFixture(selected);
-    renamed.images[key].channel = "latest";
-    assert.throws(() => validateRelease(selected, renamed), /Latest images cannot be used/);
+    for (const channel of ["latest", "test"]) {
+      const renamed = releaseFixture(selected);
+      renamed.images[key].channel = channel;
+      assert.throws(() => validateRelease(selected, renamed), /Latest images.*cannot be used/);
+    }
   }
 });
 
