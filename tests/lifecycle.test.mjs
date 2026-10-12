@@ -209,6 +209,20 @@ test("live deployment status persists progress, failures, retries and escaped HT
     await rm(output, { recursive: true, force: true });
   }
 });
+test("latest image refresh status does not imply an approved build or application deployment", async () => {
+  const output = await mkdtemp(join(tmpdir(), "dojo-latest-status-"));
+  try {
+    const refresh = await createDeploymentStatus(config, output, "refresh-latest");
+    await refresh.update("Publishing the scanned upstream digest");
+    await refresh.finish();
+    const status = JSON.parse(await readFile(join(output, "deployment-status.json"), "utf8"));
+    assert.equal(status.stages.find((stage) => stage.id === "refresh-latest").state, "succeeded");
+    assert.equal(status.stages.find((stage) => stage.id === "build").state, "pending");
+    assert.equal(status.stages.find((stage) => stage.id === "deploy").state, "pending");
+  } finally {
+    await rm(output, { recursive: true, force: true });
+  }
+});
 test("private credential bootstrap is idempotent and refuses implicit rotation", async () => {
   const values = new Map();
   const secrets = {

@@ -23,7 +23,7 @@ import { nginxProxy, nginxMode } from "../shared/nginx-proxy.mjs";
 import { publishImageReceipt } from "../shared/receipt-publishing.mjs";
 import { withPortalSession } from "./lib/portal-client.mjs";
 import { buildNginxProxy, readNginxReceipt } from "./lib/nginx-proxy.mjs";
-import { buildDrowsyDragon, readDragonReceipt } from "./lib/drowsy-dragon.mjs";
+import { buildDrowsyDragon, publishDrowsyDragonLatest, readDragonReceipt } from "./lib/drowsy-dragon.mjs";
 import { createDeploymentStatus } from "./lib/deployment-status.mjs";
 import {
   automaticContext,
@@ -76,6 +76,7 @@ const allowed = [
   "provision",
   "protection",
   "build",
+  "refresh-latest",
   "what-if",
   "deploy",
   "repair",
@@ -413,14 +414,25 @@ async function main() {
     );
     return;
   }
-  if (action === "build") {
+  if (["build", "refresh-latest"].includes(action)) {
     requireConfirmation(config, action, values.confirm);
     if (run("git", ["status", "--porcelain"]))
       throw new Error(
-        "Commit reviewed lab changes before a release build. This tool never creates commits.",
+        "Commit reviewed lab changes before publishing images. This tool never creates commits.",
       );
     run("docker", ["version"]);
     run("trivy", ["--version"]);
+  }
+  const dragonLatestOutput = fileURLToPath(new URL("output/images/drowsy-dragon/latest/", root));
+  if (action === "refresh-latest") {
+    await updateStatus("Resolving, building and scanning the current upstream Drowsy Dragon image");
+    const latest = await publishDrowsyDragonLatest(config, dragonLatestOutput);
+    console.log(
+      `Published ${latest.image}@${latest.digest} from ${latest.baseImage}. Approved pin and running applications are unchanged.`,
+    );
+    return;
+  }
+  if (action === "build") {
     await updateStatus(
       "Verifying pinned source and preparing the image recipe",
     );
@@ -558,6 +570,11 @@ async function main() {
       );
     }
     validateRelease(config, release);
+    if (config.drowsyDragonEnabled) {
+      await updateStatus("Publishing the separately scanned upstream-latest Drowsy Dragon image");
+      const latest = await publishDrowsyDragonLatest(config, dragonLatestOutput);
+      console.log(`Published ${latest.image} from ${latest.baseImage}; it is not part of the approved release.`);
+    }
     await updateStatus("Writing the reviewed release manifest");
     await writeFile(
       join(output, "release.json"),

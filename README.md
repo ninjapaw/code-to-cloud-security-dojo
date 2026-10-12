@@ -210,6 +210,29 @@ This is deliberate separation of publish and deploy
 permissions, not an auto-approval bot. Each lane has a separate concurrency group
 so a waiting deployment review cannot block an image upload.
 
+### Drowsy Dragon Pinned and Latest Images
+
+The [Drowsy Dragon Dockerfile](apps/drowsy-dragon/Dockerfile) defaults to its
+author-approved base digest. That pin and the scanned, digest-bound release
+remain unchanged until the author reviews and updates them.
+
+When Drowsy Dragon is enabled, release builds also resolve the current upstream
+`dhi.io/dotnet:8-sdk` digest and build/scan a separate image before pushing
+`<registry>.azurecr.io/<app-name>:latest`. Latest is not an alias for the older
+pinned build and is never substituted into `release.json` or a running app.
+The [deployment workflow](.github/workflows/deploy.yml) refreshes latest every
+six hours at minute 17 UTC and supports manual `refresh-latest` dispatches.
+These refreshes use `code-to-cloud-images` and its registry-scoped writer,
+share the publisher concurrency group, and cannot run automatic rollout.
+Disabled Drowsy Dragon configurations skip the scheduled image update.
+
+The moving tag reflects the upstream digest resolved by the last successful
+run; GitHub schedules may be delayed. The separate
+`drowsy-dragon-latest-<run-id>` artifact retains package/scan evidence and
+`published-image.json` with the actual base and ACR digests. See the
+[pinned/latest guide](apps/drowsy-dragon/README.md#pinned-releases-and-moving-latest)
+for local builds and approval boundaries.
+
 ### Automatic Dev Rollout
 
 Set `DOJO_AUTOMATIC_ROLLOUT=true` as both a repository variable (job selection)

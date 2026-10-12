@@ -73,7 +73,7 @@ test("deployment workflow is OIDC-only with separate publishing and deployment e
   );
   assert.match(workflow, /id-token: write/);
   assert.match(workflow, /actions: read/);
-  assert.match(workflow, /environment: \$\{\{ \(github\.event_name == 'push' \|\| inputs\.operation == 'build'\) && 'code-to-cloud-images' \|\| 'code-to-cloud-training' \}\}/);
+  assert.match(workflow, /environment: \$\{\{ \(github\.event_name == 'push' \|\| github\.event_name == 'schedule' \|\| inputs\.operation == 'build' \|\| inputs\.operation == 'refresh-latest'\) && 'code-to-cloud-images' \|\| 'code-to-cloud-training' \}\}/);
   assert.match(workflow, /github\.ref == 'refs\/heads\/dev'/);
   assert.match(workflow, /uses: azure\/login@[a-f0-9]{40} # v2\.3\.0/);
   assert.match(workflow, /confirm-resource-group/);
@@ -155,6 +155,7 @@ test("all mutation audits are offline and do not write outputs", async () => {
       "provision",
       "protection",
       "build",
+      "refresh-latest",
       "deploy",
       "repair",
       "rotate",

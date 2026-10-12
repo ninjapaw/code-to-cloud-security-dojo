@@ -15,6 +15,7 @@ import {
 } from "../shared/drowsy-dragon.mjs";
 import {
   buildDrowsyDragon,
+  publishDrowsyDragonLatest,
   readDragonReceipt,
 } from "../scripts/lib/drowsy-dragon.mjs";
 import {
@@ -32,8 +33,28 @@ const base = JSON.parse(
 const config = { ...base, subscriptionId: "test", drowsyDragonEnabled: true };
 const imageId = `sha256:${"a".repeat(64)}`;
 const digest = `sha256:${"b".repeat(64)}`;
+const upstreamDigest = `sha256:${"d".repeat(64)}`;
 const inventory =
   "libc6:amd64\t1.0\nlibc-bin\t1.0\ntar\t1.0\nlibgcrypt20:amd64\t1.0\n";
+
+function buildExecutor(calls = [], baseDigest = upstreamDigest) {
+  return async (command, args) => {
+    calls.push([command, args]);
+    if (command === "git") return "c".repeat(40);
+    if (command === "docker" && args[0] === "buildx")
+      return JSON.stringify({ digest: baseDigest });
+    if (command === "docker" && args[0] === "image") return imageId;
+    if (command === "docker" && args[0] === "run") return inventory.trimEnd();
+    if (command === "trivy") {
+      const path = args[args.indexOf("--output") + 1];
+      await writeFile(
+        path,
+        args[0] === "image" ? JSON.stringify(scanFixture()) : "{}",
+      );
+    }
+    return "";
+  };
+}
 
 function scanFixture() {
   return {
@@ -140,7 +161,7 @@ function releaseFixture(configuration) {
   };
 }
 
-test("recipe preserves the supplied digest, inventory command and sleeping entrypoint exactly", async () => {
+test("recipe preserves the approved digest, inventory command and sleeping entrypoint exactly", async () => {
   const recipe = await readFile(
     new URL("../apps/drowsy-dragon/Dockerfile", import.meta.url),
     "utf8",
@@ -148,7 +169,7 @@ test("recipe preserves the supplied digest, inventory command and sleeping entry
   assert.equal(recipe.replace(/\r\n/g, "\n"), drowsyDragonRecipe);
   assert.equal(
     drowsyDragon.baseImage,
-    "dhi.io/dotnet:8-sdk@sha256:238ae2cade2e61c0615dfdd416ff1857a343321e9e89de3b656b6f5c24ace8e8",
+    "dhi.io/dotnet:8-sdk@sha256:1ebc91b79beb49566cfb2a6a13bb6cdb42cea37e02b008248ae451e40aa7e792",
   );
   assert.equal(drowsyDragon.platform, "linux/amd64");
   const documentation = await readFile(
@@ -261,7 +282,7 @@ test("receipt binds the deployed digest, scan hash, original artifacts and appro
 
 test("previous base-image releases and receipts cannot be reused for the new pin", () => {
   const previousBase =
-    "dhi.io/dotnet:8-sdk@sha256:a04b53a72db39c248b8947109d1cce6718a7449b7828d85bdb1b8e1cc4e1b6ef";
+    "dhi.io/dotnet:8-sdk@sha256:238ae2cade2e61c0615dfdd416ff1857a343321e9e89de3b656b6f5c24ace8e8";
   const release = releaseFixture(config);
   release.images.drowsyDragon.baseImage = previousBase;
   assert.throws(() => validateRelease(config, release), /pinned provenance/);
@@ -324,20 +345,7 @@ test("release requires enabled demo evidence, unchanged provenance and separate 
 test("builder captures isolated inventory and all-severity scans; tampered artifacts and scanner failures stop release", async () => {
   const output = await mkdtemp(join(tmpdir(), "dojo-dragon-test-"));
   const calls = [];
-  const execute = async (command, args) => {
-    calls.push([command, args]);
-    if (command === "git") return "c".repeat(40);
-    if (command === "docker" && args[0] === "image") return imageId;
-    if (command === "docker" && args[0] === "run") return inventory.trimEnd();
-    if (command === "trivy") {
-      const path = args[args.indexOf("--output") + 1];
-      await writeFile(
-        path,
-        args[0] === "image" ? JSON.stringify(scanFixture()) : "{}",
-      );
-    }
-    return "";
-  };
+  const execute = buildExecutor(calls);
   try {
     const repository = names(config).drowsyDragon;
     const entry = await buildDrowsyDragon(`${repository}:test`, output, {
@@ -345,6 +353,7 @@ test("builder captures isolated inventory and all-severity scans; tampered artif
       repository,
     });
     assert.equal(entry.repository, repository);
+    assert.equal(entry.baseImage, drowsyDragon.baseImage);
     assert.equal(
       JSON.parse(await readFile(join(output, "local-image.json"), "utf8")).repository,
       repository,
@@ -353,6 +362,8 @@ test("builder captures isolated inventory and all-severity scans; tampered artif
       ([command, args]) => command === "docker" && args[0] === "build",
     )[1];
     assert.equal(build[build.indexOf("--platform") + 1], "linux/amd64");
+    assert.equal(build.includes("--build-arg"), false);
+    assert.equal(calls.some(([command, args]) => command === "docker" && args[0] === "buildx"), false);
     const inspect = calls.find(
       ([command, args]) => command === "docker" && args[0] === "run",
     )[1];
@@ -388,6 +399,163 @@ test("builder captures isolated inventory and all-severity scans; tampered artif
       }),
       /scanner unavailable/,
     );
+  } finally {
+    await rm(output, { recursive: true, force: true });
+  }
+});
+
+test("latest resolves the moving upstream tag to a digest without changing the approved recipe or release", async () => {
+  const output = await mkdtemp(join(tmpdir(), "dojo-dragon-latest-"));
+  const calls = [];
+  const recipePath = new URL("../apps/drowsy-dragon/Dockerfile", import.meta.url);
+  const approvedRecipe = await readFile(recipePath, "utf8");
+  const approvedBase = drowsyDragon.baseImage;
+  const resourceNames = names(config);
+  const image = `${resourceNames.registry}.azurecr.io/${resourceNames.drowsyDragon}:latest`;
+  try {
+    const entry = await buildDrowsyDragon(image, join(output, "latest"), {
+      execute: buildExecutor(calls),
+      repository: resourceNames.drowsyDragon,
+      latest: true,
+    });
+    const source = approvedBase.split("@")[0];
+    assert.equal(entry.baseImage, `${source}@${upstreamDigest}`);
+    assert.deepEqual(calls.find(([command, args]) => command === "docker" && args[0] === "buildx")[1], [
+      "buildx", "imagetools", "inspect", source, "--format", "{{json .Manifest}}",
+    ]);
+    const build = calls.find(([command, args]) => command === "docker" && args[0] === "build")[1];
+    assert.ok(build.includes("--pull"));
+    assert.equal(build[build.indexOf("--build-arg") + 1], `BASE_IMAGE=${entry.baseImage}`);
+    assert.equal(build[build.indexOf("--platform") + 1], "linux/amd64");
+    assert.ok(build.includes(`org.opencontainers.image.base.name=${entry.baseImage}`));
+    const recorded = JSON.parse(await readFile(join(output, "latest", "local-image.json"), "utf8"));
+    assert.equal(recorded.baseImage, entry.baseImage);
+    const release = releaseFixture(config);
+    release.images.drowsyDragon = { ...entry, digest };
+    assert.throws(() => validateRelease(config, release), /pinned provenance/);
+    await assert.rejects(readDragonReceipt({ ...entry, digest }), /deployed release/);
+
+    const pinned = await buildDrowsyDragon(image.replace(/:latest$/, ":training-test"), join(output, "pinned"), {
+      execute: buildExecutor(), repository: resourceNames.drowsyDragon,
+    });
+    assert.equal(pinned.baseImage, approvedBase);
+    assert.equal(drowsyDragon.baseImage, approvedBase);
+    assert.equal(await readFile(recipePath, "utf8"), approvedRecipe);
+    assert.equal(calls.some(([command, args]) => command === "az" || args[0] === "push"), false);
+  } finally {
+    await rm(output, { recursive: true, force: true });
+  }
+});
+
+test("latest rejects missing or invalid upstream digests and registry failures before building", async () => {
+  const output = await mkdtemp(join(tmpdir(), "dojo-dragon-resolution-"));
+  try {
+    for (const manifest of ["{}", "null", '{"digest":"sha256:short"}', "{invalid"]) {
+      const calls = [];
+      const fixture = buildExecutor(calls);
+      await assert.rejects(buildDrowsyDragon("drowsy-dragon:latest", output, {
+        latest: true,
+        execute: async (command, args) =>
+          command === "docker" && args[0] === "buildx" ? manifest : fixture(command, args),
+      }), /JSON|latest Drowsy Dragon base digest/);
+      assert.equal(calls.some(([command, args]) => command === "docker" && args[0] === "build"), false);
+    }
+    const calls = [];
+    const fixture = buildExecutor(calls);
+    await assert.rejects(buildDrowsyDragon("drowsy-dragon:latest", output, {
+      latest: true,
+      execute: async (command, args) => {
+        if (command === "docker" && args[0] === "buildx")
+          throw new Error("registry authentication failed");
+        return fixture(command, args);
+      },
+    }), /registry authentication failed/);
+    assert.equal(calls.some(([command, args]) => command === "docker" && args[0] === "build"), false);
+  } finally {
+    await rm(output, { recursive: true, force: true });
+  }
+});
+
+test("latest publishing follows upstream digest updates, always pushes latest, and leaves the author pin untouched", async () => {
+  const output = await mkdtemp(join(tmpdir(), "dojo-dragon-publish-"));
+  const calls = [];
+  const azureCalls = [];
+  const recipePath = new URL("../apps/drowsy-dragon/Dockerfile", import.meta.url);
+  const approvedRecipe = await readFile(recipePath, "utf8");
+  const approvedBase = drowsyDragon.baseImage;
+  const resourceNames = names(config);
+  const executeAz = async (args, options) => {
+    azureCalls.push([args, options]);
+    return args.includes("show-metadata") ? digest : "";
+  };
+  try {
+    for (const baseDigest of [upstreamDigest, `sha256:${"e".repeat(64)}`, `sha256:${"e".repeat(64)}`]) {
+      const entry = await publishDrowsyDragonLatest(config, output, {
+        execute: buildExecutor(calls, baseDigest), executeAz,
+      });
+      assert.equal(entry.image, `${resourceNames.registry}.azurecr.io/${resourceNames.drowsyDragon}:latest`);
+      assert.equal(entry.digest, digest);
+      assert.equal(entry.baseImage, `${approvedBase.split("@")[0]}@${baseDigest}`);
+      const recorded = JSON.parse(await readFile(join(output, "published-image.json"), "utf8"));
+      assert.equal(recorded.stage, "published-latest");
+      assert.equal(recorded.baseImage, entry.baseImage);
+      assert.equal(recorded.digest, digest);
+    }
+    const pushes = calls.filter(([command, args]) => command === "docker" && args[0] === "push");
+    assert.equal(pushes.length, 3);
+    assert.ok(pushes.every(([, args]) => args[1].endsWith(":latest")));
+    assert.equal(calls.some(([command, args]) => command === "docker" && args[0] === "tag"), false);
+    assert.deepEqual(azureCalls[0][0], ["acr", "login", "--name", resourceNames.registry]);
+    assert.deepEqual(azureCalls[1], [[
+      "acr", "manifest", "show-metadata", "--registry", resourceNames.registry,
+      "--name", `${resourceNames.drowsyDragon}:latest`, "--query", "digest",
+    ], { json: true }]);
+    assert.equal(drowsyDragon.baseImage, approvedBase);
+    assert.equal(await readFile(recipePath, "utf8"), approvedRecipe);
+  } finally {
+    await rm(output, { recursive: true, force: true });
+  }
+});
+
+test("latest publishing refuses disabled demos, failed scans, changed images and unverified registry digests", async () => {
+  const output = await mkdtemp(join(tmpdir(), "dojo-dragon-publish-guard-"));
+  try {
+    const disabledCalls = [];
+    await assert.rejects(publishDrowsyDragonLatest(base, join(output, "disabled"), {
+      execute: buildExecutor(disabledCalls),
+      executeAz: async () => { throw new Error("Unexpected Azure call"); },
+    }), /not enabled/);
+    assert.deepEqual(disabledCalls, []);
+
+    const scannerCalls = [];
+    const scannerFixture = buildExecutor(scannerCalls);
+    await assert.rejects(publishDrowsyDragonLatest(config, join(output, "scanner"), {
+      execute: async (command, args) => {
+        if (command === "trivy") throw new Error("scanner unavailable");
+        return scannerFixture(command, args);
+      },
+      executeAz: async () => { throw new Error("Unexpected Azure call"); },
+    }), /scanner unavailable/);
+    assert.equal(scannerCalls.some(([command, args]) => command === "docker" && args[0] === "push"), false);
+
+    let inspections = 0;
+    const changedCalls = [];
+    const changedFixture = buildExecutor(changedCalls);
+    await assert.rejects(publishDrowsyDragonLatest(config, join(output, "changed"), {
+      execute: async (command, args) => {
+        if (command === "docker" && args[0] === "image" && ++inspections === 2)
+          return `sha256:${"f".repeat(64)}`;
+        return changedFixture(command, args);
+      },
+      executeAz: async () => { throw new Error("Unexpected Azure call"); },
+    }), /image changed after scanning/);
+    assert.equal(changedCalls.some(([command, args]) => command === "docker" && args[0] === "push"), false);
+
+    await assert.rejects(publishDrowsyDragonLatest(config, join(output, "unverified"), {
+      execute: buildExecutor(),
+      executeAz: async (args) => args.includes("show-metadata") ? "invalid-digest" : "",
+    }), /ACR did not return a valid/);
+    await assert.rejects(readFile(join(output, "unverified", "published-image.json")), { code: "ENOENT" });
   } finally {
     await rm(output, { recursive: true, force: true });
   }

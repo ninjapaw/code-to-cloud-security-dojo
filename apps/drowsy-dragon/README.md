@@ -8,7 +8,8 @@ at build time, then sleeps indefinitely. It does **not** compile or serve a .NET
 application, expose HTTP, or run an exploit.
 
 ```dockerfile
-FROM dhi.io/dotnet:8-sdk@sha256:238ae2cade2e61c0615dfdd416ff1857a343321e9e89de3b656b6f5c24ace8e8
+ARG BASE_IMAGE=dhi.io/dotnet:8-sdk@sha256:1ebc91b79beb49566cfb2a6a13bb6cdb42cea37e02b008248ae451e40aa7e792
+FROM ${BASE_IMAGE}
 
 RUN dpkg-query -W libc6 libc-bin tar libgcrypt20
 
@@ -19,9 +20,9 @@ The executable [Dockerfile](Dockerfile) and
 [approved demo metadata](../../shared/drowsy-dragon.mjs) must agree. Builds fail
 if the base pin or commands drift. Images are built for `linux/amd64`.
 
-The selected [Docker Hub image](https://hub.docker.com/hardened-images/catalog/dhi/dotnet/images/dotnet%2Fdebian-13%2F8-sdk/sha256-238ae2cade2e61c0615dfdd416ff1857a343321e9e89de3b656b6f5c24ace8e8)
-contains .NET SDK **8.0.425** on **Debian 13 (trixie)**. The digest, not the
-moving `8-sdk` tag, selects the exact image. A release built with the previous
+The [Docker Hub catalog](https://hub.docker.com/hardened-images/catalog/dhi/dotnet)
+describes the available DHI .NET SDK images. The digest, not the moving `8-sdk`
+tag, selects the exact approved image. A release built with the previous
 base digest must be rebuilt and rescanned; its evidence is not valid for this pin.
 
 ## What this demonstrates
@@ -45,6 +46,7 @@ incomplete scans are not a clean result. Even an observed zero is only a snapsho
 
 Requires the repository's Node/npm dependencies, a running Linux Docker engine
 and Trivy with `image --list-all-pkgs` and `convert` support (CI pins 0.74.0).
+Latest builds also require Docker Buildx with `imagetools inspect` support.
 Authenticate to `dhi.io` with an authorized Docker account; even Community
 images require login:
 
@@ -64,6 +66,41 @@ all severities. It saves `packages.txt`, `scan.json`, `scan.sarif` and
 The normal container command remains `sleep infinity`; the temporary inventory
 container explicitly runs `dpkg-query` and exits. Local builds never push or
 deploy, and scanner failures stop the command.
+
+## Pinned releases and moving latest
+
+The default `BASE_IMAGE` and approved metadata stay at the author-reviewed digest.
+Normal builds and application releases use that pin even when Docker publishes
+a newer image. The pipeline never edits the Dockerfile, metadata or approved pin.
+
+For a local comparison against the current upstream `dhi.io/dotnet:8-sdk` image:
+
+```text
+npm run image:build:dragon -- --latest
+```
+
+The helper resolves the moving upstream tag through the registry, validates its
+digest, and passes the resolved digest as `BASE_IMAGE` with `--pull`. It builds
+`drowsy-dragon:latest` and records the actual base digest, package inventory and
+all-severity scan separately under `output/images/drowsy-dragon/latest/`.
+It does not relabel the approved pinned image as latest, or push a local build.
+
+When Drowsy Dragon is enabled, each release build also builds, scans and pushes
+this separate upstream-current image to the same app-named ACR repository as
+`:latest`. The deployment workflow checks again every six hours at minute 17
+UTC, using its registry-only publishing identity. Its manual `refresh-latest`
+operation performs the same latest-only update. Scheduled jobs can be delayed
+by GitHub; the tag represents the upstream digest resolved by the last
+successful run, not an instantaneous Docker Hub webhook.
+
+Latest evidence is retained as `drowsy-dragon-latest-<run-id>` with
+`published-image.json` recording the base and derived ACR digests. A failed
+resolution, scan or image-integrity check stops before the push; failed registry
+readback is not reported as verified publication.
+Latest is not added to the approved release manifest, and latest-only refreshes
+cannot run automatic application rollout. An upstream update does not invalidate
+the unchanged approved pin; promoting that update still requires the author to
+review and change the pin, then rebuild and release through the normal gates.
 
 ## Opt in to deployment
 
@@ -138,8 +175,12 @@ approval. No Azure resources are created by CI or by a local image build.
    Reports include the package inventory, observed image, findings, timestamps
    and hashes, but do not expose the full scanner artifact through the UI.
 
-For remediation, review a newer base digest, update the Dockerfile and approved
-metadata together, then rebuild, rescan and deploy through the same gates.
+For remediation, review a newer base digest and update the [Dockerfile](Dockerfile),
+[approved metadata](../../shared/drowsy-dragon.mjs), digest assertions in the
+[tests](../../tests/drowsy-dragon.test.mjs), and this recipe documentation in the
+same commit. Run `npm test`, then rebuild, rescan
+and deploy through the same gates. Updating only the Dockerfile fails CI before
+the image build.
 Compare same-scope snapshots and individual findings; a lower count alone is
 not proof that a particular CVE was fixed.
 

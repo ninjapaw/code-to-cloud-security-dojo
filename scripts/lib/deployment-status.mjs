@@ -14,6 +14,7 @@ const stages = [
 ];
 const additionalStages = {
   bootstrap: "Private credential bootstrap",
+  "refresh-latest": "Latest image publishing",
   repair: "Repair release",
   rotate: "Credential rotation",
   inventory: "Removal inventory",

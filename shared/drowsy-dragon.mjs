@@ -10,12 +10,12 @@ export const drowsyDragon = Object.freeze({
   id: "drowsy-dragon",
   title: "Drowsy Dragon",
   baseImage:
-    "dhi.io/dotnet:8-sdk@sha256:238ae2cade2e61c0615dfdd416ff1857a343321e9e89de3b656b6f5c24ace8e8",
+    "dhi.io/dotnet:8-sdk@sha256:1ebc91b79beb49566cfb2a6a13bb6cdb42cea37e02b008248ae451e40aa7e792",
   packages: Object.freeze(["libc6", "libc-bin", "tar", "libgcrypt20"]),
   platform: "linux/amd64",
 });
 
-export const drowsyDragonRecipe = `FROM ${drowsyDragon.baseImage}\n\nRUN dpkg-query -W ${drowsyDragon.packages.join(" ")}\n\nCMD ["sleep", "infinity"]\n`;
+export const drowsyDragonRecipe = `ARG BASE_IMAGE=${drowsyDragon.baseImage}\nFROM \${BASE_IMAGE}\n\nRUN dpkg-query -W ${drowsyDragon.packages.join(" ")}\n\nCMD ["sleep", "infinity"]\n`;
 export function drowsyDragonEvidenceKey(digest, scanHash) {
   return imageEvidenceKey(drowsyDragon.id, digest, scanHash);
 }

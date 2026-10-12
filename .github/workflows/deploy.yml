@@ -3,6 +3,8 @@ name: Code to Cloud Security Dojo deployment
 on:
   push:
     branches: [dev]
+  schedule:
+    - cron: "17 */6 * * *"
   workflow_dispatch:
     inputs:
       operation:
@@ -14,6 +16,7 @@ on:
           - provision
           - protection
           - build
+          - refresh-latest
           - what-if
           - deploy
           - verify
@@ -41,17 +44,17 @@ permissions:
   id-token: write
 
 concurrency:
-  group: ${{ (github.event_name == 'push' || inputs.operation == 'build') && 'dojo-images-code-to-cloud-training' || 'dojo-deployment-code-to-cloud-training' }}
+  group: ${{ (github.event_name == 'push' || github.event_name == 'schedule' || inputs.operation == 'build' || inputs.operation == 'refresh-latest') && 'dojo-images-code-to-cloud-training' || 'dojo-deployment-code-to-cloud-training' }}
   cancel-in-progress: false
 
 jobs:
   lifecycle:
-    if: github.ref == 'refs/heads/dev' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    if: github.ref == 'refs/heads/dev' && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
     runs-on: ${{ fromJSON(vars.DOJO_DEPLOY_RUNNER_LABELS || '["ubuntu-latest"]') }}
     timeout-minutes: 90
-    environment: ${{ (github.event_name == 'push' || inputs.operation == 'build') && 'code-to-cloud-images' || 'code-to-cloud-training' }}
+    environment: ${{ (github.event_name == 'push' || github.event_name == 'schedule' || inputs.operation == 'build' || inputs.operation == 'refresh-latest') && 'code-to-cloud-images' || 'code-to-cloud-training' }}
     env:
-      OPERATION: ${{ github.event_name == 'push' && 'build' || inputs.operation }}
+      OPERATION: ${{ github.event_name == 'schedule' && 'refresh-latest' || github.event_name == 'push' && 'build' || inputs.operation }}
       AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
       AZURE_PROTECTION_CLIENT_ID: ${{ vars.AZURE_PROTECTION_CLIENT_ID }}
       DOJO_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
@@ -80,7 +83,7 @@ jobs:
       - name: Validate target approval and create private configuration
         id: configuration
         env:
-          CONFIRM_RESOURCE_GROUP: ${{ github.event_name == 'push' && vars.DOJO_RESOURCE_GROUP || inputs.confirm-resource-group }}
+          CONFIRM_RESOURCE_GROUP: ${{ (github.event_name == 'push' || github.event_name == 'schedule') && vars.DOJO_RESOURCE_GROUP || inputs.confirm-resource-group }}
           ACCEPT_COSTS: ${{ inputs.accept-costs }}
         run: |
           set -euo pipefail
@@ -113,14 +116,14 @@ jobs:
           console.log(`drowsy-dragon=${config.drowsyDragonEnabled === true}`);
           NODE
       - name: Test Dockerfile build and release guardrails
-        if: env.OPERATION == 'build'
+        if: env.OPERATION == 'build' || env.OPERATION == 'refresh-latest'
         run: |
           npm test
           npm run source:check
           npm run image:check:nginx
           npm run check:public
       - name: Check access to the pinned DHI source image
-        if: env.OPERATION == 'build' && steps.configuration.outputs.drowsy-dragon == 'true'
+        if: (env.OPERATION == 'build' || env.OPERATION == 'refresh-latest') && steps.configuration.outputs.drowsy-dragon == 'true'
         id: dhi-login
         env:
           DHI_USERNAME: ${{ secrets.DHI_USERNAME }}
@@ -140,9 +143,10 @@ jobs:
           fi
           printf '%s' "$DHI_TOKEN" | docker login dhi.io --username "$DHI_USERNAME" --password-stdin
           echo "authenticated=true" >> "$GITHUB_OUTPUT"
-          base_image="$(node --input-type=module -e 'import { drowsyDragon } from "./shared/drowsy-dragon.mjs"; console.log(drowsyDragon.baseImage)')"
+          base_image="$(node --input-type=module -e 'import { drowsyDragon } from "./shared/drowsy-dragon.mjs"; console.log(process.env.OPERATION === "refresh-latest" ? drowsyDragon.baseImage.split("@")[0] : drowsyDragon.baseImage)')"
           docker pull --platform linux/amd64 "$base_image"
       - name: Sign in to Azure with GitHub OIDC
+        if: env.OPERATION != 'refresh-latest' || steps.configuration.outputs.drowsy-dragon == 'true'
         uses: azure/login@eec3c95657c1536435858eda1f3ff5437fee8474 # v2.3.0
         with:
           client-id: ${{ inputs.operation == 'protection' && env.AZURE_PROTECTION_CLIENT_ID || env.AZURE_CLIENT_ID }}
@@ -197,6 +201,7 @@ jobs:
               exit 1
             }
       - name: Execute guarded lifecycle operation
+        if: env.OPERATION != 'refresh-latest' || steps.configuration.outputs.drowsy-dragon == 'true'
         env:
           ACCEPT_COSTS: ${{ inputs.accept-costs }}
           RELEASE_RUN_ID: ${{ inputs.release-run-id }}
@@ -232,6 +237,10 @@ jobs:
               node scripts/deploy.mjs build \
                 --confirm "build:$DOJO_SUBSCRIPTION_ID:$DOJO_RESOURCE_GROUP"
               ;;
+            refresh-latest)
+              node scripts/deploy.mjs refresh-latest \
+                --confirm "refresh-latest:$DOJO_SUBSCRIPTION_ID:$DOJO_RESOURCE_GROUP"
+              ;;
             what-if)
               [[ "$RELEASE_RUN_ID" =~ ^[0-9]+$ ]] || { echo "release-run-id must be numeric" >&2; exit 1; }
               node scripts/deploy.mjs what-if \
@@ -249,6 +258,14 @@ jobs:
               node scripts/deploy.mjs deploy "${deploy_args[@]}"
               ;;
           esac
+      - name: Retain separately published latest image evidence
+        if: always() && (env.OPERATION == 'build' || env.OPERATION == 'refresh-latest') && steps.configuration.outputs.drowsy-dragon == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: drowsy-dragon-latest-${{ github.run_id }}
+          path: output/images/drowsy-dragon/latest/
+          if-no-files-found: warn
+          retention-days: 90
       - name: Export the scanned release images and Dockerfiles
         if: success() && env.OPERATION == 'build'
         run: |

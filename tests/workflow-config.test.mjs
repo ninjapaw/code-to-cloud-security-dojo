@@ -145,7 +145,10 @@ test("the publisher job cannot select the deployment identity or operation", asy
   for (const [event, input, expectedOperation, expectedEnvironment] of [
     ["push", undefined, "build", "code-to-cloud-images"],
     ["push", "deploy", "build", "code-to-cloud-images"],
+    ["schedule", undefined, "refresh-latest", "code-to-cloud-images"],
+    ["schedule", "deploy", "refresh-latest", "code-to-cloud-images"],
     ["workflow_dispatch", "build", "build", "code-to-cloud-images"],
+    ["workflow_dispatch", "refresh-latest", "refresh-latest", "code-to-cloud-images"],
     ...["doctor", "provision", "protection", "what-if", "deploy", "verify", "report"]
       .map((input) => ["workflow_dispatch", input, input, "code-to-cloud-training"]),
   ]) {
@@ -155,17 +158,18 @@ test("the publisher job cannot select the deployment identity or operation", asy
     assert.equal(runInNewContext(environment, context), expectedEnvironment);
     assert.equal(
       runInNewContext(concurrency, context),
-      expectedOperation === "build" ? "dojo-images-code-to-cloud-training" : "dojo-deployment-code-to-cloud-training",
+      ["build", "refresh-latest"].includes(expectedOperation) ? "dojo-images-code-to-cloud-training" : "dojo-deployment-code-to-cloud-training",
     );
   }
   for (const [event, ref] of [
     ["pull_request", "refs/heads/dev"], ["pull_request_target", "refs/heads/dev"],
     ["push", "refs/heads/main"], ["workflow_dispatch", "refs/heads/main"],
+    ["schedule", "refs/heads/main"],
   ])
     assert.equal(runInNewContext(enabled, {
       github: { event_name: event, ref }, inputs: { operation: "build" },
     }), false);
-  assert.match(workflow, /CONFIRM_RESOURCE_GROUP: \$\{\{ github\.event_name == 'push' && vars\.DOJO_RESOURCE_GROUP \|\| inputs\.confirm-resource-group \}\}/);
+  assert.match(workflow, /CONFIRM_RESOURCE_GROUP: \$\{\{ \(github\.event_name == 'push' \|\| github\.event_name == 'schedule'\) && vars\.DOJO_RESOURCE_GROUP \|\| inputs\.confirm-resource-group \}\}/);
   assert.match(workflow, /\(\.event == "workflow_dispatch" or \.event == "push"\)/);
   assert.match(workflow, /\.head_sha == \$sha/);
   assert.match(workflow, /\.operation == "build"/);
@@ -194,6 +198,8 @@ test("automatic rollout depends on the same successful build, is dev-only, and a
     { vars: { DOJO_AUTOMATIC_ROLLOUT: "false" } },
     { github: { ref: "refs/heads/main", event_name: "push" } },
     { github: { ref: "refs/heads/dev", event_name: "pull_request" } },
+    { github: { ref: "refs/heads/dev", event_name: "schedule" } },
+    { github: { ref: "refs/heads/dev", event_name: "workflow_dispatch" }, inputs: { operation: "refresh-latest" } },
   ])
     assert.equal(runInNewContext(condition, { ...context, ...override }), false);
   assert.match(rollout, /name: dojo-release-\$\{\{ github\.run_id \}\}/);
@@ -202,6 +208,21 @@ test("automatic rollout depends on the same successful build, is dev-only, and a
   assert.match(rollout, /if: always\(\) && steps\.rollout-login\.outcome == 'success' && steps\.runner-address\.outcome == 'success'/);
   assert.match(rollout, /await updateRunnerAccess\(config, new AzureClient\(config\), false\)/);
   assert.doesNotMatch(rollout, /protection --|deprovision|provision --|rotate|pending_deployments/);
+});
+test("latest refreshes are scheduled, opt-in and separate from approved release artifacts", async () => {
+  const workflow = await readFile(
+    new URL("../.github/workflows/deploy.yml", import.meta.url), "utf8",
+  );
+  assert.match(workflow, /schedule:\r?\n    - cron: "17 \*\/6 \* \* \*"/);
+  assert.match(workflow, /- refresh-latest/);
+  assert.match(workflow, /if: env\.OPERATION != 'refresh-latest' \|\| steps\.configuration\.outputs\.drowsy-dragon == 'true'/);
+  assert.match(workflow, /process\.env\.OPERATION === "refresh-latest" \? drowsyDragon\.baseImage\.split\("@"\)\[0\] : drowsyDragon\.baseImage/);
+  assert.match(workflow, /refresh-latest\)\r?\n\s+node scripts\/deploy\.mjs refresh-latest/);
+  assert.match(workflow, /--confirm "refresh-latest:\$DOJO_SUBSCRIPTION_ID:\$DOJO_RESOURCE_GROUP"/);
+  assert.match(workflow, /name: drowsy-dragon-latest-\$\{\{ github\.run_id \}\}/);
+  assert.match(workflow, /path: output\/images\/drowsy-dragon\/latest\//);
+  assert.match(workflow, /name: Export the scanned release images and Dockerfiles\r?\n\s+if: success\(\) && env\.OPERATION == 'build'/);
+  assert.match(workflow, /name: Record build workflow provenance\r?\n\s+if: success\(\) && env\.OPERATION == 'build'/);
 });
 test("automatic publisher has registry-scoped push and read-only ownership access, not deployment rights", async () => {
   const template = await readFile(
