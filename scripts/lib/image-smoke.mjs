@@ -2,7 +2,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { run } from "./lifecycle.mjs";
 
 export async function smokeTestImage(image, entry, {
-  execute = run, fetcher = fetch, pause = () => delay(5000), attempts = 90, log = console.log,
+  execute = run, pause = () => delay(5000), attempts = 90, log = console.log,
 } = {}) {
   if (!["dojo", "portal", "secret-bootstrap", "drowsy-dragon", "nginx-proxy"].includes(image) ||
       !/^sha256:[a-f0-9]{64}$/.test(entry.imageId || ""))
@@ -30,7 +30,7 @@ export async function smokeTestImage(image, entry, {
     container = await execute("docker", [
       "run", "--detach", "--network", sleeping ? "none" : network,
       "--security-opt", "no-new-privileges",
-      ...(sleeping ? ["--read-only", "--cap-drop", "ALL"] : ["--publish", `127.0.0.1::${port}`]),
+      ...(sleeping ? ["--read-only", "--cap-drop", "ALL"] : []),
       entry.image,
       ...(image === "portal" ? ["apps/control-portal/server.mjs", "--preview"] : []),
     ]);
@@ -40,25 +40,46 @@ export async function smokeTestImage(image, entry, {
       if (await execute("docker", ["inspect", container, "--format", "{{.State.Running}}"]) !== "true")
         throw new Error("Drowsy Dragon did not remain running with its sleeping entrypoint");
     } else {
-      const endpoint = await execute("docker", ["port", container, `${port}/tcp`]);
-      if (!/^127\.0\.0\.1:[0-9]{1,5}$/.test(endpoint) ||
-          Number(endpoint.split(":")[1]) < 1 || Number(endpoint.split(":")[1]) > 65535)
-        throw new Error("Smoke-test endpoint was not restricted to loopback");
+      const endpoint = `http://127.0.0.1:${port}${image === "dojo" ? "/WebGoat/actuator/health" : "/health"}`;
+      let probe = ["curl", "--silent", "--show-error", "--max-time", "5", "--write-out", "\n%{http_code}", endpoint];
+      if (image === "portal") {
+        const entrypoint = JSON.parse(await execute("docker", [
+          "image", "inspect", entry.image, "--format", "{{json .Config.Entrypoint}}",
+        ]));
+        if (!Array.isArray(entrypoint) || entrypoint.length !== 1 ||
+            typeof entrypoint[0] !== "string" || !/^\/[A-Za-z0-9/_-]+\/node$/.test(entrypoint[0]))
+          throw new Error("Portal smoke probe requires the reviewed Node executable entrypoint");
+        probe = [entrypoint[0], "--input-type=module", "-e", `
+try {
+  const response = await fetch(${JSON.stringify(endpoint)}, { redirect: "error", signal: AbortSignal.timeout(5000) });
+  process.stdout.write((await response.text()) + "\\n" + response.status);
+} catch (error) {
+  if (error.name === "TimeoutError" || ["ECONNREFUSED", "ECONNRESET", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_SOCKET"].includes(error.cause?.code)) {
+    console.error("Container-local health not ready: " + (error.cause?.code ?? error.name));
+    process.exitCode = 75;
+  } else throw error;
+}
+`];
+      }
       let ready = false;
       for (let attempt = 0; attempt < attempts; attempt++) {
         try {
-          const response = await fetcher(`http://${endpoint}${image === "dojo" ? "/WebGoat/actuator/health" : "/health"}`, {
-            redirect: "error", signal: AbortSignal.timeout(5000),
-          });
-          if (response.status === 200) {
-            const result = await response.json();
+          const output = await execute("docker", ["exec", container, ...probe]);
+          const separator = output.lastIndexOf("\n");
+          if (Buffer.byteLength(output) > 4096 || separator < 0 ||
+              !/^[1-5][0-9]{2}$/.test(output.slice(separator + 1)))
+            throw new Error("Container-local health probe returned invalid or oversized output");
+          const status = Number(output.slice(separator + 1));
+          if (status === 200) {
+            const result = JSON.parse(output.slice(0, separator));
             ready = image === "dojo" ? result.status === "UP"
               : image === "portal" ? result.status === "running" && result.mode === "read-only-preview" && result.codeRevision === entry.sourceRevision
                 : result.status === "healthy" && result.environment === "training";
-          } else await response.body?.cancel();
+          }
+          if (!ready)
+            log(`[test] ${image} container-local health not ready (HTTP ${status}); attempt ${attempt + 1}/${attempts}`);
         } catch (error) {
-          if (error.name !== "TimeoutError" &&
-              !["ECONNREFUSED", "ECONNRESET", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_SOCKET"].includes(error.cause?.code))
+          if (!/^docker failed \((?:7|28|52|56|75)\)/.test(error.message))
             throw error;
           log(`[test] ${image} health not ready (${error.name}); attempt ${attempt + 1}/${attempts}`);
         }
@@ -70,7 +91,7 @@ export async function smokeTestImage(image, entry, {
         throw new Error("Isolated image health did not match the expected runtime before timeout");
       }
     }
-    log(`[test] ${entry.image}: ${sleeping ? "sleeping runtime observed without network access" : "isolated loopback health verified"}; image ID=${entry.imageId}`);
+    log(`[test] ${entry.image}: ${sleeping ? "sleeping runtime observed without network access" : "container-local loopback health verified without published ports"}; image ID=${entry.imageId}`);
     return { state: "observed", kind: sleeping ? "sleeping-runtime" : "isolated-health", image: entry.image, imageId: entry.imageId };
   } finally {
     try {

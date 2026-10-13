@@ -113,13 +113,17 @@ test("manual audit validates SHA inputs offline and never writes outputs or auth
   }
 });
 
-function smokeExecutor(calls) {
+function smokeExecutor(calls, image, payload) {
   return async (command, args) => {
     calls.push([command, args]);
+    if (args.includes("{{json .Config.Entrypoint}}")) return '["/nodejs/bin/node"]';
     if (args[0] === "image") return entry.imageId;
     if (args[0] === "network" && args[1] === "create") return network;
     if (args[0] === "run" && args.includes("--detach")) return container;
-    if (args[0] === "port") return "127.0.0.1:49152";
+    if (args[0] === "exec")
+      return `${JSON.stringify(payload ?? (image === "dojo" ? { status: "UP" }
+        : image === "portal" ? { status: "running", mode: "read-only-preview", codeRevision: entry.sourceRevision }
+          : { status: "healthy", environment: "training" }))}\n200`;
     if (args[0] === "inspect") return "true";
     return "";
   };
@@ -129,14 +133,13 @@ test("optional smoke tests isolate runtime access and never execute the credenti
   for (const image of ["dojo", "portal", "nginx-proxy", "drowsy-dragon", "secret-bootstrap"]) {
     const calls = [];
     const result = await smokeTestImage(image, entry, {
-      execute: smokeExecutor(calls), pause: async () => {}, log: () => {},
-      fetcher: async () => Response.json(image === "dojo" ? { status: "UP" }
-        : image === "portal" ? { status: "running", mode: "read-only-preview", codeRevision: entry.sourceRevision }
-          : { status: "healthy", environment: "training" }),
+      execute: smokeExecutor(calls, image), pause: async () => {}, log: () => {},
     });
     assert.equal(result.state, "observed");
     const run = calls.find(([, args]) => args[0] === "run")[1];
     assert.equal(run.includes("--privileged"), false);
+    assert.equal(run.includes("--publish"), false);
+    assert.equal(calls.some(([, args]) => args[0] === "port"), false);
     assert.equal(run.some((arg) => /AZURE_|DOJO_ADMIN/.test(arg)), false);
     if (image === "secret-bootstrap") {
       assert.ok(run.includes("--check"));
@@ -147,26 +150,55 @@ test("optional smoke tests isolate runtime access and never execute the credenti
       if (image !== "drowsy-dragon") {
         assert.ok(calls.some(([, args]) => args[0] === "network" && args.includes("--internal")));
         assert.ok(calls.some(([, args]) => args[0] === "network" && args[1] === "rm" && args.includes(network)));
+        const probe = calls.find(([, args]) => args[0] === "exec")[1];
+        assert.equal(probe[1], container);
+        assert.ok(probe.some((arg) => arg.includes("http://127.0.0.1:")));
+        if (image === "portal") {
+          assert.equal(probe[2], "/nodejs/bin/node");
+          const syntax = spawnSync(process.execPath, ["--input-type=module", "--check"], {
+            input: probe.at(-1), encoding: "utf8",
+          });
+          assert.equal(syntax.status, 0, syntax.stderr);
+        }
       }
     }
     if (image === "portal") assert.ok(run.includes("--preview"));
   }
 });
 
-test("smoke failures and non-loopback bindings fail explicitly and clean up only created container/network IDs", async () => {
+test("smoke failures and invalid probe output fail explicitly and clean up only created container/network IDs", async () => {
   const calls = [];
   await assert.rejects(smokeTestImage("portal", entry, {
-    execute: smokeExecutor(calls), attempts: 1, pause: async () => {}, log: () => {},
-    fetcher: async () => Response.json({ status: "running", mode: "configured", codeRevision: entry.sourceRevision }),
+    execute: smokeExecutor(calls, "portal", { status: "running", mode: "configured", codeRevision: entry.sourceRevision }),
+    attempts: 1, pause: async () => {}, log: () => {},
   }), /health did not match/);
   assert.ok(calls.some(([, args]) => args[0] === "rm" && args.includes(container)));
   assert.ok(calls.some(([, args]) => args[0] === "network" && args[1] === "rm" && args.includes(network)));
   const otherCalls = [];
-  const execute = smokeExecutor(otherCalls);
+  const execute = smokeExecutor(otherCalls, "dojo");
   await assert.rejects(smokeTestImage("dojo", entry, {
-    execute: (command, args) => args[0] === "port" ? "0.0.0.0:49152" : execute(command, args),
+    execute: (command, args) => args[0] === "exec" ? "missing HTTP status" : execute(command, args),
     log: () => {},
-  }), /loopback/);
+  }), /invalid or oversized/);
   assert.ok(otherCalls.some(([, args]) => args[0] === "rm" && args.includes(container)));
   assert.ok(otherCalls.some(([, args]) => args[0] === "network" && args[1] === "rm" && args.includes(network)));
+});
+
+test("container-local probes retry startup failures without weakening internal network isolation", async () => {
+  const calls = [];
+  const execute = smokeExecutor(calls, "portal");
+  let attempts = 0;
+  const logs = [];
+  const result = await smokeTestImage("portal", entry, {
+    execute: async (command, args) => {
+      if (args[0] === "exec" && ++attempts === 1)
+        throw new Error("docker failed (75). Container-local health not ready: ECONNREFUSED");
+      return execute(command, args);
+    },
+    pause: async () => {}, log: (line) => logs.push(line),
+  });
+  assert.equal(result.state, "observed");
+  assert.equal(attempts, 2);
+  assert.ok(logs.some((line) => line.includes("not ready")));
+  assert.equal(calls.some(([, args]) => args.includes("--publish") || args.includes("--network=host")), false);
 });

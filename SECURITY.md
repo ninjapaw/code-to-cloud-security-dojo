@@ -101,7 +101,8 @@ The manual hash catalog/test workflow runs only from trusted `dev` under the
 registry-only identity. Inputs accept `latest` or exact SHA256 digests from the
 reviewed source repositories, never arbitrary image URLs or shell commands.
 Manual tests cannot update latest or deploy Azure resources. Optional runtime
-checks use an internal Docker network/loopback or no networking, never receive
+checks use an internal Docker network with container-local loopback probes and
+no published ports, or no networking; they never receive
 registry/Azure/application credentials, and clean up created IDs. The portal is
 read-only preview; the credential worker is syntax-only and never writes secrets.
 GitHub's native dropdowns are static: hash catalogs offer copy controls and

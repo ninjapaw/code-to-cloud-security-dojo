@@ -344,7 +344,8 @@ They **never change latest, approved pins, the release manifest or infrastructur
 Portal/utility HIGH/CRITICAL scan gates still apply.
 
 The optional `smoke-test` checkbox runs only isolated checks on the Linux runner:
-internal Docker network and loopback-only HTTP for web workloads, read-only
+internal Docker network and container-local loopback HTTP for web workloads
+(no published ports or host-network access), read-only
 preview for the portal, and no-network sleeping-state verification for the
 dragon. The credential worker is syntax-only and never executes its Key Vault
 bootstrap. Created container/network IDs are removed after success or failure.
