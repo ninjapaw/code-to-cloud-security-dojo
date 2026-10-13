@@ -263,7 +263,7 @@ jobs:
           name: dojo-latest-images-${{ github.run_id }}
           path: output/images/latest/
           if-no-files-found: warn
-          retention-days: 90
+          retention-days: 30
       - name: Export the scanned release images and Dockerfiles
         if: success() && env.OPERATION == 'build'
         run: |
@@ -312,7 +312,7 @@ jobs:
           name: dojo-release-${{ github.run_id }}
           path: output/code-to-cloud-training/
           if-no-files-found: error
-          retention-days: 90
+          retention-days: 30
       - name: Retain live deployment status
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -322,7 +322,7 @@ jobs:
             output/code-to-cloud-training/deployment-status.json
             output/code-to-cloud-training/deployment-status.html
           if-no-files-found: ignore
-          retention-days: 90
+          retention-days: 30
       - name: Sign out of the source registry
         if: always() && steps.dhi-login.outputs.authenticated == 'true'
         run: docker logout dhi.io

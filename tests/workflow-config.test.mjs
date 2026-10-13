@@ -225,6 +225,14 @@ test("latest refreshes are scheduled for the core images even without optional d
   assert.match(workflow, /name: Export the scanned release images and Dockerfiles\r?\n\s+if: success\(\) && env\.OPERATION == 'build'/);
   assert.match(workflow, /name: Record build workflow provenance\r?\n\s+if: success\(\) && env\.OPERATION == 'build'/);
 });
+test("owned workflows keep artifact retention within the observed 30-day repository limit", async () => {
+  for (const name of ["deploy", "dojo", "image-experiments"]) {
+    const workflow = await readFile(new URL(`../.github/workflows/${name}.yml`, import.meta.url), "utf8");
+    for (const [, days] of workflow.matchAll(/^\s+retention-days:\s*(\d+)\s*$/gm))
+      assert.ok(Number(days) >= 1 && Number(days) <= 30, `${name}: artifact retention must fit 1-30 days`);
+  }
+});
+
 test("automatic publisher has registry-scoped push and read-only ownership access, not deployment rights", async () => {
   const template = await readFile(
     new URL("../infra/image-publisher.bicep", import.meta.url), "utf8",

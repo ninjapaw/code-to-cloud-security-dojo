@@ -495,7 +495,8 @@ removes partial exports on failure.
 
 Image archives are retained for seven days to bound storage costs. Release
 manifests, provenance and scan evidence remain in `dojo-release-<run-id>` for
-90 days; preview and deployment download that smaller artifact, not image tar
+30 days, matching the repository's GitHub artifact-retention limit; preview and
+deployment download that smaller artifact, not image tar
 files. ACR remains the deployment registry and runtime references stay
 digest-pinned. Validation artifacts are local scan builds, not approved releases.
 After downloading and extracting a container artifact, verify `SHA256SUMS` and
