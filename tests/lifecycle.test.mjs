@@ -22,6 +22,7 @@ import {
   requireConfirmation,
   validateRelease,
   verifiedPrivateSecrets,
+  run,
 } from "../scripts/lib/lifecycle.mjs";
 import { confirmation } from "../shared/config.mjs";
 import { isLabHostname, names } from "../shared/config.mjs";
@@ -33,6 +34,16 @@ import {
 const config = JSON.parse(
   await readFile(new URL("../config/deploy.config.json", import.meta.url)),
 );
+test("native command failures expose stdout-only diagnostics without hiding stderr", () => {
+  assert.throws(
+    () => run(process.execPath, ["-e", 'console.log("OCI runtime: curl executable was not found"); process.exit(127)']),
+    /failed \(127\).*curl executable was not found/,
+  );
+  assert.throws(
+    () => run(process.execPath, ["-e", 'console.log("secondary output"); console.error("primary error"); process.exit(1)']),
+    /failed \(1\).*primary error/,
+  );
+});
 function releaseFor(selected) {
   const resourceNames = names(selected);
   return {

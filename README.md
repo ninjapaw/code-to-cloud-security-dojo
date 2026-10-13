@@ -345,7 +345,10 @@ Portal/utility HIGH/CRITICAL scan gates still apply.
 
 The optional `smoke-test` checkbox runs only isolated checks on the Linux runner:
 internal Docker network and container-local loopback HTTP for web workloads
-(no published ports or host-network access), read-only
+(no published ports or host-network access). Probes use each runtime's existing
+tools: the JDK HTTP client for WebGoat, the verified Node entrypoint for the
+portal, and curl for NGINX; no package installation or base-image change is
+needed. Checks use read-only
 preview for the portal, and no-network sleeping-state verification for the
 dragon. The credential worker is syntax-only and never executes its Key Vault
 bootstrap. Created container/network IDs are removed after success or failure.

@@ -1,4 +1,5 @@
 import { setTimeout as delay } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
 import { run } from "./lifecycle.mjs";
 
 export async function smokeTestImage(image, entry, {
@@ -42,7 +43,11 @@ export async function smokeTestImage(image, entry, {
     } else {
       const endpoint = `http://127.0.0.1:${port}${image === "dojo" ? "/WebGoat/actuator/health" : "/health"}`;
       let probe = ["curl", "--silent", "--show-error", "--max-time", "5", "--write-out", "\n%{http_code}", endpoint];
-      if (image === "portal") {
+      if (image === "dojo") {
+        const source = fileURLToPath(new URL("../ContainerHealthProbe.java", import.meta.url));
+        await execute("docker", ["cp", source, `${container}:/tmp/ContainerHealthProbe.java`]);
+        probe = ["java", "/tmp/ContainerHealthProbe.java", endpoint];
+      } else if (image === "portal") {
         const entrypoint = JSON.parse(await execute("docker", [
           "image", "inspect", entry.image, "--format", "{{json .Config.Entrypoint}}",
         ]));

@@ -21,7 +21,7 @@ export function run(
   });
   if (result.error || result.status !== 0)
     throw new Error(
-      `${command} failed (${result.status ?? result.error?.code}). ${inherit ? "See command output." : String(result.stderr || "").slice(0, 1500)}`,
+      `${command} failed (${result.status ?? result.error?.code}). ${inherit ? "See command output." : (String(result.stderr || "").trim() || String(result.stdout || "").trim()).slice(0, 1500)}`,
     );
   return json ? JSON.parse(result.stdout) : (result.stdout || "").trim();
 }

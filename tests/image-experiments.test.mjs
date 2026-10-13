@@ -160,6 +160,12 @@ test("optional smoke tests isolate runtime access and never execute the credenti
           });
           assert.equal(syntax.status, 0, syntax.stderr);
         }
+        if (image === "dojo") {
+          assert.equal(probe[2], "java");
+          assert.equal(probe[3], "/tmp/ContainerHealthProbe.java");
+          assert.ok(calls.some(([, args]) => args[0] === "cp" &&
+            args[2] === `${container}:/tmp/ContainerHealthProbe.java`));
+        }
       }
     }
     if (image === "portal") assert.ok(run.includes("--preview"));
