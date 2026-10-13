@@ -402,13 +402,15 @@ or an unavailable ARM API can still interrupt cleanup: inspect and remove the
 specific `GitHubRollout-<run-id>-<attempt>` rule before retrying. No storage
 firewall is opened and no private NGINX endpoint becomes public.
 
-Before publishing new image receipts, the job starts the verified portal image
-and waits for its image-baked source revision on `/health`. This lets a new
-approved base-image recipe be validated by the matching portal code. It then
-publishes the scan receipts through the authenticated portal/VNet path, applies
-the release Bicep, reconciles the ACI scan-hash tag with the exact deployed image,
-and verifies all enabled app digests, portal revision, private HTTP/storage
-connectivity and optional-image scan evidence.
+Before publishing new image receipts, the job starts the verified portal image,
+waits for its image-baked source revision on `/health`, and requires its private
+Blob evidence dependency to report accessible. This lets a new approved
+base-image recipe be validated by the matching portal code without racing the
+authenticated audit write. It then publishes the scan receipts through the
+authenticated portal/VNet path, applies the release Bicep, reconciles the ACI
+scan-hash tag with the exact deployed image, and verifies all enabled app
+digests, portal revision, private HTTP/storage connectivity and optional-image
+scan evidence.
 
 The `dojo-rollout-<run-id>-<attempt>` artifact retains the preview and live report.
 An unverified GitHub/Defender connector remains an explicit independent check,

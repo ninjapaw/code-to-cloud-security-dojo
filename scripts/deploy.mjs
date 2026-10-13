@@ -612,7 +612,9 @@ async function main() {
     await verifyPrivateCredentials(client, config, output, resourceNames);
     const applyRelease = async () => {
       if (values.automatic) {
-        await updateStatus("Starting the verified portal revision before publishing new image receipts");
+        await updateStatus(
+          "Starting the verified portal revision and waiting for private evidence access",
+        );
         await prepareAutomaticPortal(config, release, client);
       }
       if (imageReceipts.length) {

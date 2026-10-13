@@ -10,6 +10,18 @@ const sitePath = (config, name) =>
   `${groupPath(config)}/providers/Microsoft.Web/sites/${name}`;
 const imageReference = (config, release, key) =>
   `${names(config).registry}.azurecr.io/${names(config)[key]}@${release.images[key].digest}`;
+const retryablePortalStatuses = new Set([403, 429, 502, 503, 504]);
+const retryablePortalErrors = new Set([
+  "ECONNRESET",
+  "ECONNREFUSED",
+  "ENOTFOUND",
+  "UND_ERR_SOCKET",
+  "UND_ERR_CONNECT_TIMEOUT",
+]);
+const privateHealthStates = {
+  dojo: "healthy",
+  evidence: "accessible",
+};
 
 function requireValue(condition, message) {
   if (!condition) throw new Error(message);
@@ -138,31 +150,61 @@ export async function waitForRelease(check, label, { attempts = 40, pause = () =
   throw new Error(`${label} did not become ready: ${detail}`);
 }
 
-export async function checkPortalRevision(config, revision, fetcher = fetch) {
+async function readPortalHealth(config, path, label, fetcher) {
   let response;
   try {
-    response = await fetcher(`https://${names(config).portal}.azurewebsites.net/health`, {
+    response = await fetcher(`https://${names(config).portal}.azurewebsites.net${path}`, {
       redirect: "error", signal: AbortSignal.timeout(15000),
     });
   } catch (error) {
     if (error.name !== "TimeoutError" &&
-        !["ECONNRESET", "ECONNREFUSED", "ENOTFOUND", "UND_ERR_SOCKET", "UND_ERR_CONNECT_TIMEOUT"].includes(error.cause?.code))
+        !retryablePortalErrors.has(error.cause?.code))
       throw error;
-    return { ready: false, detail: `Portal startup connection: ${error.cause?.code || error.name}` };
+    return { detail: `${label} connection: ${error.cause?.code || error.name}` };
   }
-  if ([403, 429, 502, 503, 504].includes(response.status)) {
+  if (retryablePortalStatuses.has(response.status)) {
     await response.body?.cancel();
-    return { ready: false, detail: `Portal startup HTTP ${response.status}` };
+    return { detail: `${label} HTTP ${response.status}` };
   }
-  const health = await readJsonResponse(response, 4096, "Portal revision health");
+  return { health: await readJsonResponse(response, 4096, label) };
+}
+
+export async function checkPortalRevision(config, revision, fetcher = fetch) {
+  const result = await readPortalHealth(
+    config,
+    "/health",
+    "Portal startup",
+    fetcher,
+  );
+  if (!result.health) return { ready: false, detail: result.detail };
   return {
-    ready: health.status === "running" && health.codeRevision === revision,
+    ready:
+      result.health.status === "running" &&
+      result.health.codeRevision === revision,
     detail: "Portal has not started the requested source revision",
-    value: health,
+    value: result.health,
   };
 }
 
-export async function prepareAutomaticPortal(config, release, client) {
+export async function checkPortalDependency(config, dependency, fetcher = fetch) {
+  const expected = privateHealthStates[dependency];
+  requireValue(expected, `Unsupported portal dependency health check: ${dependency}`);
+  const label = `${dependency} private health`;
+  const result = await readPortalHealth(
+    config,
+    `/health/${dependency}`,
+    label,
+    fetcher,
+  );
+  if (!result.health) return { ready: false, detail: result.detail };
+  return {
+    ready: result.health.status === expected,
+    detail: `${label} response mismatch`,
+    value: result.health,
+  };
+}
+
+export async function prepareAutomaticPortal(config, release, client, fetcher = fetch) {
   const path = `${sitePath(config, names(config).portal)}/config/web?api-version=${webVersion}`;
   const expected = `DOCKER|${imageReference(config, release, "portal")}`;
   if ((await client.request(path)).properties.linuxFxVersion !== expected) {
@@ -171,8 +213,12 @@ export async function prepareAutomaticPortal(config, release, client) {
       "Portal bootstrap image configuration did not match the verified release");
   }
   await waitForRelease(
-    () => checkPortalRevision(config, release.codeRevision),
+    () => checkPortalRevision(config, release.codeRevision, fetcher),
     "Portal bootstrap",
+  );
+  await waitForRelease(
+    () => checkPortalDependency(config, "evidence", fetcher),
+    "Portal evidence dependency",
   );
 }
 
@@ -246,19 +292,11 @@ export async function verifyAutomaticRelease(config, release, client) {
     (access.evidencePublicAccess || storage.properties.publicNetworkAccess === "Disabled"),
   "Evidence storage access boundary changed");
   await waitForRelease(() => checkPortalRevision(config, release.codeRevision), "Portal release");
-  for (const [path, expected] of [["dojo", "healthy"], ["evidence", "accessible"]]) {
-    await waitForRelease(async () => {
-      const response = await fetch(`https://${resourceNames.portal}.azurewebsites.net/health/${path}`, {
-        redirect: "error", signal: AbortSignal.timeout(15000),
-      });
-      if (response.status === 503) {
-        await response.body?.cancel();
-        return { ready: false, detail: `${path} private connectivity is not ready` };
-      }
-      const health = await readJsonResponse(response, 4096, `${path} private health`);
-      return { ready: health.status === expected, detail: `${path} private health response mismatch` };
-    }, `${path} private connectivity`);
-  }
+  for (const dependency of ["dojo", "evidence"])
+    await waitForRelease(
+      () => checkPortalDependency(config, dependency),
+      `${dependency} private connectivity`,
+    );
   return waitForRelease(async () => {
     const report = await withPortalSession(config, (portal) => portal.report());
     return validateRolloutReport(config, release, report);

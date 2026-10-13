@@ -9,6 +9,8 @@ import {
   withRunnerAccess,
   waitForRelease,
   checkPortalRevision,
+  checkPortalDependency,
+  prepareAutomaticPortal,
   reconcileDragonScanTag,
   validateRolloutReport,
 } from "../scripts/lib/automatic-rollout.mjs";
@@ -182,6 +184,43 @@ test("portal startup requires the image-baked revision and bounded readiness wai
     "test", { attempts: 2, pause: async () => {} }), /wrong image/);
   await assert.rejects(waitForRelease(async () => { throw new Error("read denied"); },
     "test", { attempts: 2, pause: async () => {} }), /read denied/);
+});
+
+test("automatic portal bootstrap waits for private evidence access before authenticated publication", async () => {
+  const expectedImage =
+    `DOCKER|${resourceNames.registry}.azurecr.io/${resourceNames.portal}@${digest}`;
+  const client = {
+    request: async (path, options) => {
+      assert.match(path, new RegExp(`/sites/${resourceNames.portal}/config/web\\?`));
+      assert.equal(options, undefined);
+      return { properties: { linuxFxVersion: expectedImage } };
+    },
+  };
+  const requests = [];
+  const fetcher = async (url, options) => {
+    requests.push(url);
+    assert.equal(options.redirect, "error");
+    if (url.endsWith("/health/evidence"))
+      return Response.json({ status: "accessible" });
+    return Response.json({ status: "running", codeRevision: revision });
+  };
+  await prepareAutomaticPortal(config, release, client, fetcher);
+  assert.deepEqual(requests, [
+    `https://${resourceNames.portal}.azurewebsites.net/health`,
+    `https://${resourceNames.portal}.azurewebsites.net/health/evidence`,
+  ]);
+  assert.equal(
+    (await checkPortalDependency(
+      config,
+      "evidence",
+      async () => new Response(null, { status: 503 }),
+    )).ready,
+    false,
+  );
+  await assert.rejects(
+    checkPortalDependency(config, "unknown", fetcher),
+    /Unsupported portal dependency/,
+  );
 });
 
 test("ACI scan tags are reconciled only for the exact deployed release image", async () => {
