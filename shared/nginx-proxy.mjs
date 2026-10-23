@@ -8,6 +8,7 @@ export const nginxProxy = Object.freeze({
   targetCve: "CVE-2026-42533",
   advisory: "https://my.f5.com/manage/s/article/K000162097",
   dockerfileHash: "5ca1588bccf0752731d69227a176b977df0b5d3b5c933618cd301eadd388a4d5",
+  registryDockerfileHash: "6a93921a7eb81e7c89fc7f5f2a4071b7b999ff72e28cd3fdf3f292eb2f7fb81e",
   source: Object.freeze({
     repository: "https://github.com/ninjapaw/ninjapaws-cloud-security-dojo.git",
     revision: "7a6d8fbd232000ab2de43f59a05ba5cdbc1e16c9",
@@ -43,7 +44,7 @@ export function summarizeNginxReceipt(receipt, digest, scanHash) {
   if (receipt.mode === undefined)
     throw new Error("NGINX Proxy receipt is missing its release mode");
   const source = validateNginxSourceLock(JSON.parse(receipt.artifacts.sourceLock));
-  if (receipt.hashes.dockerfile !== nginxProxy.dockerfileHash)
+  if (![nginxProxy.dockerfileHash, nginxProxy.registryDockerfileHash].includes(receipt.hashes.dockerfile))
     throw new Error("NGINX Proxy recipe does not match the reviewed source");
   validateNginxInventory(summary.packages, mode.mode);
   return {

@@ -417,6 +417,7 @@ test("both build modes preserve upstream source and capture isolated inventory/f
       const calls = [];
       const execute = async (command, args) => {
         calls.push([command, args]);
+        if (command === "npm") return "https://user.registry.example/npm/";
         if (command === "git") return "c".repeat(40);
         if (command === "docker" && args[0] === "image") return imageId;
         if (command === "docker" && args[0] === "run")
@@ -483,6 +484,7 @@ test("NGINX latest resolves its base in an owned wrapper without changing either
       const calls = [];
       const execute = async (command, args) => {
         calls.push([command, args]);
+        if (command === "npm") return "https://user.registry.example/npm/";
         if (command === "git") return "c".repeat(40);
         if (command === "docker" && args[0] === "buildx")
           return JSON.stringify({ digest: upstreamDigest });

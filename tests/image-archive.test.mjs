@@ -17,6 +17,7 @@ const sourceDigest = `sha256:${"b".repeat(64)}`;
 function builder(calls = [], selectedDigest = sourceDigest) {
   return async (command, args) => {
     calls.push([command, args]);
+    if (command === "npm") return "https://user.registry.example/npm/";
     if (command === "git") return "d".repeat(40);
     if (command === "docker" && args[0] === "buildx")
       return JSON.stringify({ digest: args[3].includes("@") ? args[3].split("@")[1] : selectedDigest });

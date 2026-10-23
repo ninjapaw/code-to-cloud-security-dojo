@@ -7,6 +7,21 @@ import { prepareDojoImage, verifySource } from "./dojo-source.mjs";
 import { run } from "./lifecycle.mjs";
 import { publishImageArchive } from "./image-archive.mjs";
 
+export async function npmRegistry(environment = process.env, execute = run) {
+  const value = environment.NPM_REGISTRY ?? environment.npm_config_registry ??
+    environment.NPM_CONFIG_REGISTRY ?? await execute("npm", ["config", "get", "registry"]);
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("NPM_REGISTRY must be an absolute HTTPS registry URL without credentials, query or fragment");
+  }
+  if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash ||
+      value !== value.trim())
+    throw new Error("NPM_REGISTRY must be an absolute HTTPS registry URL without credentials, query or fragment");
+  return url.href;
+}
+
 export async function resolveLatestBaseImage(baseImage, { execute = run, selection = "latest", log = console.log } = {}) {
   const source = baseImage.split("@")[0];
   if (!/^[a-z0-9][a-z0-9./:_-]+$/.test(source) || !source.split("/").at(-1).includes(":"))
@@ -100,6 +115,7 @@ export async function buildCoreImage(component, image, output, {
   }
   await execute("docker", [
     "build", "--platform", "linux/amd64", ...buildArgs,
+    ...(component !== "dojo" ? ["--build-arg", `NPM_REGISTRY=${await npmRegistry(process.env, execute)}`] : []),
     "--label", `org.opencontainers.image.source=${manifest ? source.repository.replace(/\.git$/, "") : "https://github.com/ninjapaw/code-to-cloud-security-dojo"}`,
     "--label", `org.opencontainers.image.revision=${manifest ? manifest.revision : sourceRevision}`,
     ...(manifest ? ["--label", `dojo.source.sha256=${manifest.sha256}`] : []),

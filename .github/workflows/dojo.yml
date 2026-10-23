@@ -39,7 +39,13 @@ jobs:
         with:
           node-version: "24"
           cache: npm
-      - run: npm ci
+      - name: Use optional npm registry
+        if: vars.NPM_REGISTRY != ''
+        env:
+          NPM_REGISTRY: ${{ vars.NPM_REGISTRY }}
+        run: echo "npm_config_registry=$NPM_REGISTRY" >> "$GITHUB_ENV"
+      - name: Install dependencies
+        run: npm ci
       - uses: aquasecurity/setup-trivy@e6c2c5e321ed9123bda567646e2f96565e34abe1 # v0.2.4
         with:
           version: v0.74.0
@@ -85,7 +91,13 @@ jobs:
         with:
           node-version: "24"
           cache: npm
-      - run: npm ci
+      - name: Use optional npm registry
+        if: vars.NPM_REGISTRY != ''
+        env:
+          NPM_REGISTRY: ${{ vars.NPM_REGISTRY }}
+        run: echo "npm_config_registry=$NPM_REGISTRY" >> "$GITHUB_ENV"
+      - name: Install dependencies
+        run: npm ci
       - uses: aquasecurity/setup-trivy@e6c2c5e321ed9123bda567646e2f96565e34abe1 # v0.2.4
         with:
           version: v0.74.0
@@ -148,7 +160,13 @@ jobs:
         with:
           node-version: "24"
           cache: npm
-      - run: npm ci
+      - name: Use optional npm registry
+        if: vars.NPM_REGISTRY != ''
+        env:
+          NPM_REGISTRY: ${{ vars.NPM_REGISTRY }}
+        run: echo "npm_config_registry=$NPM_REGISTRY" >> "$GITHUB_ENV"
+      - name: Install dependencies
+        run: npm ci
       - run: npm test
       - run: npm run source:check
       - run: npm run image:check:nginx
@@ -180,7 +198,7 @@ jobs:
         run: |
           set -euo pipefail
           npm run image:build -- --tag dojo:scan
-          docker build -f apps/control-portal/Dockerfile -t dojo-portal:scan .
+          docker build --build-arg NPM_REGISTRY="$(npm config get registry)" -f apps/control-portal/Dockerfile -t dojo-portal:scan .
       - name: Verify Dojo root routing
         run: |
           set -euo pipefail

@@ -1,9 +1,11 @@
 ARG BUILD_IMAGE=node:24-bookworm-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6
 ARG RUNTIME_IMAGE=gcr.io/distroless/nodejs24-debian13:nonroot@sha256:9eeb7f5887d0e239e78264b06f7f11d2e14be534050481803a9e4728fcdd278e
 FROM ${BUILD_IMAGE} AS dependencies
+ARG NPM_REGISTRY
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev && npm cache clean --force
+RUN if [ -n "${NPM_REGISTRY}" ]; then export npm_config_registry="${NPM_REGISTRY}"; fi && \
+    npm ci --omit=dev && npm cache clean --force
 
 FROM ${RUNTIME_IMAGE}
 WORKDIR /app

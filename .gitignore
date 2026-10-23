@@ -9,6 +9,7 @@ output/
 config/*.local.json
 .env.*
 playwright-report/
+.playwright-mcp/
 test-results/
 credentials/
 secrets/

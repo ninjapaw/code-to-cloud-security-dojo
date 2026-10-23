@@ -13,7 +13,7 @@ import { sha256 } from "../../shared/image-evidence.mjs";
 import { fingerprint } from "./dojo-source.mjs";
 import { captureImageEvidence } from "./image-evidence.mjs";
 import { run } from "./lifecycle.mjs";
-import { imageBaseArguments } from "./image-build.mjs";
+import { imageBaseArguments, npmRegistry } from "./image-build.mjs";
 
 const home = fileURLToPath(new URL("apps/nginx-proxy/", root));
 const sourcePath = join(home, "upstream");
@@ -35,16 +35,25 @@ export function nginxLatestRecipe(dockerfile) {
   return `ARG BASE_IMAGE=ubuntu:24.04\n${dockerfile.replace(from, "FROM ${BASE_IMAGE}")}`;
 }
 
+export function nginxRegistryRecipe(dockerfile) {
+  if (!/^ARG NPM_REGISTRY_URL=\S+\r?$/m.test(dockerfile) ||
+      dockerfile.split("COPY package*.json ./").length !== 2)
+    throw new Error("NGINX Proxy npm recipe changed; review registry inheritance");
+  const normalize = "RUN node -e 'const fs = require(\"node:fs\"); const path = \"package-lock.json\"; const lock = JSON.parse(fs.readFileSync(path, \"utf8\")); for (const entry of Object.values(lock.packages)) { if (!entry.link && /^https?:/.test(entry.resolved || \"\")) delete entry.resolved; } fs.writeFileSync(path, JSON.stringify(lock, null, 2) + \"\\n\");'";
+  return dockerfile.replace(/^ARG NPM_REGISTRY_URL=\S+\r?$/m, "ARG NPM_REGISTRY_URL")
+    .replace("COPY package*.json ./", `COPY package*.json ./\n${normalize}`);
+}
+
 export async function buildNginxProxy(image, output, selectedMode, { execute = run, repository = nginxProxy.id, latest = false, baseOverrides = {}, log = console.log } = {}) {
   const mode = nginxMode(selectedMode);
   const source = await verifyNginxSource();
-  let dockerfile = await readFile(recipePath, "utf8");
+  let dockerfile = nginxRegistryRecipe(await readFile(recipePath, "utf8"));
   const sourceLock = await readFile(sourceLockPath, "utf8");
   const sourceRevision = await execute("git", ["rev-parse", "HEAD"]);
   if (!/^[a-f0-9]{40}$/.test(sourceRevision))
     throw new Error("NGINX Proxy requires a Git source revision");
   await mkdir(output, { recursive: true });
-  let buildRecipePath = recipePath;
+  const buildRecipePath = join(output, "Dockerfile");
   let baseImages;
   let buildArgs = [];
   const modified = latest || Object.keys(baseOverrides).length > 0;
@@ -52,11 +61,12 @@ export async function buildNginxProxy(image, output, selectedMode, { execute = r
     dockerfile = nginxLatestRecipe(dockerfile);
     ({ baseImages, buildArgs } = await imageBaseArguments(dockerfile, { latest, baseOverrides, execute, log }));
     dockerfile = dockerfile.replace("ARG BASE_IMAGE=ubuntu:24.04", `ARG BASE_IMAGE=${baseImages.BASE_IMAGE}`);
-    buildRecipePath = join(output, "Dockerfile");
-    await writeFile(buildRecipePath, dockerfile);
   }
+  await writeFile(buildRecipePath, dockerfile);
   await execute("docker", [
     "build", "--platform", nginxProxy.platform, ...buildArgs,
+    "--build-arg", `NPM_REGISTRY_URL=${await npmRegistry(process.env, execute)}`,
+    "--build-arg", "NPM_USE_MIRROR=true",
     "--build-arg", `NGINX_VERSION=${mode.version}`,
     "--build-arg", `VULNERABILITY_STATUS=${mode.mode}`,
     "--build-arg", "BASE_OS_IMAGE=ubuntu",
@@ -123,7 +133,7 @@ export async function readNginxReceipt(entry) {
       scanJson: entry.scanJsonHash,
       sarif: entry.scanHash,
     },
-    artifacts: { dockerfile, sourceLock, inventory, scanJson },
+    artifacts: { dockerfile: nginxRegistryRecipe(dockerfile), sourceLock, inventory, scanJson },
   };
   summarizeNginxReceipt(receipt, entry.digest, entry.scanJsonHash);
   return receipt;

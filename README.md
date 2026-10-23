@@ -43,6 +43,23 @@ Validate deployment, access controls, rotation and detections on a disposable ta
 
 Requires Node.js 22+ and npm. From the repository root:
 
+npm inherits your user/environment registry configuration. To inspect it:
+
+```text
+npm config get registry
+```
+
+GitHub Actions jobs inherit the runner's npm settings unless an explicit repository/organization
+`NPM_REGISTRY` variable is provided. No registry is forced when that variable is unset, and no
+developer npm configuration is rewritten. GitHub has no personal-profile-wide Actions variable.
+Portal, secret-bootstrap and NGINX build wrappers forward the user's effective registry from
+`npm config get registry` (or an explicit `NPM_REGISTRY`/native npm environment override) to
+their container build. Direct portal/worker Docker builds accept an optional
+`--build-arg NPM_REGISTRY=<https-registry-url>`; without it they use npm's container defaults.
+Do not put registry credentials in build arguments. The verified upstream NGINX snapshot is
+unchanged; an owned generated recipe removes its registry default and lockfile download URLs
+inside the build layer, preserving versions/integrity and recording the derived recipe hash.
+
 ```text
 npm ci
 npm test
@@ -101,6 +118,28 @@ The training portal uses one administrator credential, not an enterprise SSO/MFA
 system. It adds Secure/HttpOnly/SameSite cookies, signed revocable one-hour sessions,
 same-origin CSRF checks, login limits, a cross-instance test lease and cooldown.
 Do not repurpose it as a production control plane.
+
+## Cloudflare DNS ownership
+
+[Pawprint's shared DNS contract](https://github.com/ninjapaw/pawprint/blob/dev/docs/external-dns.md)
+owns the Cloudflare reconciler used by the related Pawton, PHP2Shell, M365
+Profiles and Sentinel Optimizer repositories. Azure application bindings,
+Front Door WAF associations and managed certificates remain Bicep-owned;
+application hostname intent remains in its consuming repository. Only genuinely
+shared platform aliases belong in Pawprint, not duplicated application records.
+
+This dojo currently configures no custom hostname, so it retains its existing
+Azure endpoints and needs no Cloudflare credential. No alias is added to the
+admin portal, private NGINX app, or Drowsy Dragon. A friendly hostname would not
+make a deliberately vulnerable public workload safer or change its access
+restrictions.
+
+If a custom subdomain is explicitly introduced later, use the shared
+`app-service` DNS intent (an `asuid` TXT plus DNS-only CNAME) and the
+hostname/managed-SNI Bicep sequence used by Pawton. Scope record ownership to
+this repository and environment, validate public DNS and HTTPS independently,
+and remove the routing CNAME before releasing the Azure hostname. Do not create
+another Cloudflare client here or move Cloudflare-hosted zones into Azure DNS.
 
 ## Defender and Code-to-Cloud Story
 

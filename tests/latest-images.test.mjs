@@ -25,6 +25,7 @@ const workerRecipe = await readFile(join(root, "scripts", "Dockerfile.secret-boo
 function executor(calls, selected = config, digest = upstreamDigest) {
   return async (command, args) => {
     calls.push([command, args]);
+    if (command === "npm") return "https://user.registry.example/npm/";
     if (command === "git") return "d".repeat(40);
     if (command === "docker" && args[0] === "buildx") return JSON.stringify({ digest });
     if (command === "docker" && args[0] === "image") return imageId;
