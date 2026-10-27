@@ -88,8 +88,8 @@ test("manual workflow selection is protected, registry-only and cannot promote l
   assert.match(workflow, /group: dojo-images-code-to-cloud-training/);
   assert.doesNotMatch(workflow, /contents: write|actions: write|client-secret|environment: code-to-cloud-training|deploy --|provision --|--automatic/);
   const condition = workflow.match(/^    if: (.+)$/m)[1];
-  assert.equal(runInNewContext(condition, { github: { ref: "refs/heads/dev", event_name: "workflow_dispatch" } }), true);
-  for (const [ref, event_name] of [["refs/heads/main", "workflow_dispatch"], ["refs/heads/dev", "pull_request"], ["refs/heads/dev", "push"]])
+  assert.equal(runInNewContext(condition, { github: { ref: "refs/heads/main", event_name: "workflow_dispatch" } }), true);
+  for (const [ref, event_name] of [["refs/heads/dev", "workflow_dispatch"], ["refs/heads/main", "pull_request"], ["refs/heads/main", "push"]])
     assert.equal(runInNewContext(condition, { github: { ref, event_name } }), false);
   assert.match(workflow, /node scripts\/image-experiments\.mjs "\$\{args\[@\]\}"/);
   assert.match(workflow, /retention-days: 30/);

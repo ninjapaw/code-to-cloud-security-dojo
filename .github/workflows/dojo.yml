@@ -3,7 +3,7 @@ name: Code to Cloud Security Dojo validation
 on:
   pull_request:
   push:
-    branches: [dev, main]
+    branches: [main]
   workflow_dispatch:
     inputs:
       drowsy-dragon:
@@ -79,7 +79,7 @@ jobs:
             apps/nginx-proxy/source-lock.json
 
   drowsy-dragon:
-    if: github.ref == 'refs/heads/dev' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.drowsy-dragon))
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.drowsy-dragon))
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: drowsy-dragon-images

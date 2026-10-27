@@ -30,11 +30,11 @@ function requireValue(condition, message) {
 export function automaticContext(config, release, environment = process.env) {
   requireValue(
     environment.GITHUB_ACTIONS === "true" &&
-      environment.GITHUB_REF === "refs/heads/dev" &&
+      environment.GITHUB_REF === "refs/heads/main" &&
       ["push", "workflow_dispatch"].includes(environment.GITHUB_EVENT_NAME) &&
       environment.GITHUB_REPOSITORY === "ninjapaw/code-to-cloud-security-dojo" &&
       environment.GITHUB_WORKFLOW_REF ===
-        `${environment.GITHUB_REPOSITORY}/.github/workflows/deploy.yml@refs/heads/dev` &&
+        `${environment.GITHUB_REPOSITORY}/.github/workflows/deploy.yml@refs/heads/main` &&
       environment.DOJO_AUTOMATIC_ROLLOUT === "true" &&
       /^\d+$/.test(environment.GITHUB_RUN_ID || "") &&
       /^\d+$/.test(environment.GITHUB_RUN_ATTEMPT || "") &&

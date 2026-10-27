@@ -2,7 +2,7 @@ name: Code to Cloud Security Dojo deployment
 
 on:
   push:
-    branches: [dev]
+    branches: [main]
   schedule:
     - cron: "17 */6 * * *"
   workflow_dispatch:
@@ -49,7 +49,7 @@ concurrency:
 
 jobs:
   lifecycle:
-    if: github.ref == 'refs/heads/dev' && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
     runs-on: ${{ fromJSON(vars.DOJO_DEPLOY_RUNNER_LABELS || '["ubuntu-latest"]') }}
     timeout-minutes: 90
     environment: ${{ (github.event_name == 'push' || github.event_name == 'schedule' || inputs.operation == 'build' || inputs.operation == 'refresh-latest') && 'code-to-cloud-images' || 'code-to-cloud-training' }}
@@ -174,7 +174,7 @@ jobs:
               and .head_sha == $sha
               and .conclusion == "success"' \
             <<< "$run_json" > /dev/null || {
-              echo "Release artifact must come from a successful build operation on this exact dev commit." >&2
+              echo "Release artifact must come from a successful build operation on this exact main commit." >&2
               exit 1
             }
       - name: Download reviewed release evidence
@@ -198,7 +198,7 @@ jobs:
             '.runId == $runId
               and .repository == $repository
               and .workflow == ".github/workflows/deploy.yml"
-              and .ref == "refs/heads/dev"
+              and .ref == "refs/heads/main"
               and .sha == $sha
               and .operation == "build"' \
             output/code-to-cloud-training/workflow-provenance.json > /dev/null || {
@@ -335,7 +335,7 @@ jobs:
 
   rollout:
     needs: lifecycle
-    if: needs.lifecycle.result == 'success' && github.ref == 'refs/heads/dev' && (github.event_name == 'push' || inputs.operation == 'build') && vars.DOJO_AUTOMATIC_ROLLOUT == 'true'
+    if: needs.lifecycle.result == 'success' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || inputs.operation == 'build') && vars.DOJO_AUTOMATIC_ROLLOUT == 'true'
     runs-on: ${{ fromJSON(vars.DOJO_DEPLOY_RUNNER_LABELS || '["ubuntu-latest"]') }}
     timeout-minutes: 45
     environment: code-to-cloud-training
@@ -390,7 +390,7 @@ jobs:
             '.runId == $runId
               and .repository == $repository
               and .workflow == ".github/workflows/deploy.yml"
-              and .ref == "refs/heads/dev"
+              and .ref == "refs/heads/main"
               and .sha == $sha
               and .operation == "build"' \
             output/code-to-cloud-training/workflow-provenance.json > /dev/null

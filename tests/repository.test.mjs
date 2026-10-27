@@ -74,7 +74,7 @@ test("deployment workflow is OIDC-only with separate publishing and deployment e
   assert.match(workflow, /id-token: write/);
   assert.match(workflow, /actions: read/);
   assert.match(workflow, /environment: \$\{\{ \(github\.event_name == 'push' \|\| github\.event_name == 'schedule' \|\| inputs\.operation == 'build' \|\| inputs\.operation == 'refresh-latest'\) && 'code-to-cloud-images' \|\| 'code-to-cloud-training' \}\}/);
-  assert.match(workflow, /github\.ref == 'refs\/heads\/dev'/);
+  assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
   assert.match(workflow, /uses: azure\/login@[a-f0-9]{40} # v2\.3\.0/);
   assert.match(workflow, /confirm-resource-group/);
   assert.match(workflow, /accept-costs/);
@@ -97,7 +97,7 @@ test("deployment workflow is OIDC-only with separate publishing and deployment e
   assert.match(validation, /environment: drowsy-dragon-images/);
   assert.match(
     validation,
-    /github\.ref == 'refs\/heads\/dev'.*inputs\.drowsy-dragon/,
+    /github\.ref == 'refs\/heads\/main'.*inputs\.drowsy-dragon/,
   );
 });
 test("offline plans honor public, admin-IP-only and private access configuration", async () => {

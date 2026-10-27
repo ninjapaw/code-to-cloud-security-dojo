@@ -11,6 +11,8 @@ config/*.local.json
 playwright-report/
 .playwright-mcp/
 test-results/
+testResults.xml
+.vscode/
 credentials/
 secrets/
 .azure/

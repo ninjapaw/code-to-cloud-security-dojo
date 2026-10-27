@@ -134,7 +134,7 @@ test("the publisher job cannot select the deployment identity or operation", asy
   const workflow = await readFile(
     new URL("../.github/workflows/deploy.yml", import.meta.url), "utf8",
   );
-  assert.match(workflow, /on:\r?\n  push:\r?\n    branches: \[dev\]/);
+  assert.match(workflow, /on:\r?\n  push:\r?\n    branches: \[main\]/);
   assert.doesNotMatch(workflow, /^  pull_request(?:_target)?:/m);
   const environment = workflow.match(/^    environment: \$\{\{ (.+) \}\}$/m)?.[1];
   const operation = workflow.match(/^      OPERATION: \$\{\{ (.+) \}\}$/m)?.[1];
@@ -152,7 +152,7 @@ test("the publisher job cannot select the deployment identity or operation", asy
     ...["doctor", "provision", "protection", "what-if", "deploy", "verify", "report"]
       .map((input) => ["workflow_dispatch", input, input, "code-to-cloud-training"]),
   ]) {
-    const context = { github: { event_name: event, ref: "refs/heads/dev" }, inputs: { operation: input } };
+    const context = { github: { event_name: event, ref: "refs/heads/main" }, inputs: { operation: input } };
     assert.equal(runInNewContext(enabled, context), true);
     assert.equal(runInNewContext(operation, context), expectedOperation);
     assert.equal(runInNewContext(environment, context), expectedEnvironment);
@@ -162,9 +162,9 @@ test("the publisher job cannot select the deployment identity or operation", asy
     );
   }
   for (const [event, ref] of [
-    ["pull_request", "refs/heads/dev"], ["pull_request_target", "refs/heads/dev"],
-    ["push", "refs/heads/main"], ["workflow_dispatch", "refs/heads/main"],
-    ["schedule", "refs/heads/main"],
+    ["pull_request", "refs/heads/main"], ["pull_request_target", "refs/heads/main"],
+    ["push", "refs/heads/dev"], ["workflow_dispatch", "refs/heads/dev"],
+    ["schedule", "refs/heads/dev"],
   ])
     assert.equal(runInNewContext(enabled, {
       github: { event_name: event, ref }, inputs: { operation: "build" },
@@ -189,17 +189,17 @@ test("automatic rollout depends on the same successful build, is dev-only, and a
   const condition = rollout.match(/^    if: (.+)$/m)?.[1];
   const context = {
     needs: { lifecycle: { result: "success" } },
-    github: { ref: "refs/heads/dev", event_name: "push" },
+    github: { ref: "refs/heads/main", event_name: "push" },
     inputs: {}, vars: { DOJO_AUTOMATIC_ROLLOUT: "true" },
   };
   assert.equal(runInNewContext(condition, context), true);
   for (const override of [
     { needs: { lifecycle: { result: "failure" } } },
     { vars: { DOJO_AUTOMATIC_ROLLOUT: "false" } },
-    { github: { ref: "refs/heads/main", event_name: "push" } },
-    { github: { ref: "refs/heads/dev", event_name: "pull_request" } },
-    { github: { ref: "refs/heads/dev", event_name: "schedule" } },
-    { github: { ref: "refs/heads/dev", event_name: "workflow_dispatch" }, inputs: { operation: "refresh-latest" } },
+    { github: { ref: "refs/heads/dev", event_name: "push" } },
+    { github: { ref: "refs/heads/main", event_name: "pull_request" } },
+    { github: { ref: "refs/heads/main", event_name: "schedule" } },
+    { github: { ref: "refs/heads/main", event_name: "workflow_dispatch" }, inputs: { operation: "refresh-latest" } },
   ])
     assert.equal(runInNewContext(condition, { ...context, ...override }), false);
   assert.match(rollout, /name: dojo-release-\$\{\{ github\.run_id \}\}/);
@@ -289,7 +289,7 @@ test("validation exports all image recipes without Azure credentials or deployin
   assert.doesNotMatch(workflow, /azure\/login|id-token: write|docker push|scripts\/deploy\.mjs deploy/);
 });
 
-test("Drowsy Dragon is selected for dev pushes and defaults on for manual dev builds", async () => {
+test("Drowsy Dragon is selected for main pushes and defaults on for manual training builds", async () => {
   const workflow = await readFile(
     new URL("../.github/workflows/dojo.yml", import.meta.url), "utf8",
   );
@@ -301,7 +301,7 @@ test("Drowsy Dragon is selected for dev pushes and defaults on for manual dev bu
   assert.ok(job, "Protected Drowsy Dragon job must exist");
   assert.equal(
     job.match(/    if: ([^\r\n]+)/)?.[1],
-    "github.ref == 'refs/heads/dev' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.drowsy-dragon))",
+    "github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.drowsy-dragon))",
   );
   assert.match(job, /environment: drowsy-dragon-images/);
   assert.match(job, /npm run image:build:dragon -- --tag drowsy-dragon:scan/);

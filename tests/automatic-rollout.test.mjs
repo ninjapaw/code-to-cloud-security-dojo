@@ -36,9 +36,9 @@ const release = {
 const environment = {
   GITHUB_ACTIONS: "true",
   GITHUB_EVENT_NAME: "push",
-  GITHUB_REF: "refs/heads/dev",
+  GITHUB_REF: "refs/heads/main",
   GITHUB_REPOSITORY: "ninjapaw/code-to-cloud-security-dojo",
-  GITHUB_WORKFLOW_REF: "ninjapaw/code-to-cloud-security-dojo/.github/workflows/deploy.yml@refs/heads/dev",
+  GITHUB_WORKFLOW_REF: "ninjapaw/code-to-cloud-security-dojo/.github/workflows/deploy.yml@refs/heads/main",
   GITHUB_RUN_ID: "1234",
   GITHUB_RUN_ATTEMPT: "1",
   GITHUB_SHA: revision,
@@ -47,12 +47,12 @@ const environment = {
 };
 const group = `/subscriptions/${config.subscriptionId}/resourceGroups/${config.resourceGroup}`;
 
-test("automatic rollout is explicit, same-revision and limited to the trusted dev workflow", () => {
+test("automatic rollout is explicit, same-revision and limited to the trusted main workflow", () => {
   assert.equal(automaticContext(config, release, environment).ipAddress, "203.0.113.11/32");
   assert.equal(automaticContext(config, release, environment).name, "GitHubRollout-1234-1");
   assert.doesNotMatch(automaticContext(config, release, environment).description, /[;,]/);
   for (const changes of [
-    { GITHUB_ACTIONS: "false" }, { GITHUB_REF: "refs/heads/main" },
+    { GITHUB_ACTIONS: "false" }, { GITHUB_REF: "refs/heads/dev" },
     { GITHUB_EVENT_NAME: "pull_request" }, { GITHUB_EVENT_NAME: "pull_request_target" },
     { GITHUB_SHA: "d".repeat(40) }, { DOJO_AUTOMATIC_ROLLOUT: "false" },
     { GITHUB_WORKFLOW_REF: "other/workflow" }, { GITHUB_REPOSITORY: "other/repository" },

@@ -234,7 +234,7 @@ Generate the subject with the existing
 Do not reuse the broadly privileged deployment identity for automatic publishing.
 
 Create `code-to-cloud-images` with a custom deployment-branch policy allowing
-only the `dev` branch and no required reviewers or wait timer. Set its
+only the `main` branch and no required reviewers or wait timer. Set its
 `AZURE_CLIENT_ID` to the template's `clientId` output. Copy the non-secret
 `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` and `DOJO_*` configuration variables
 from `code-to-cloud-training`, keeping all release configuration choices equal.
@@ -421,7 +421,7 @@ published manifest hash and scan/bundle hash; they are not interchangeable.
 Set `DOJO_AUTOMATIC_ROLLOUT=true` as both a repository variable (job selection)
 and a `code-to-cloud-training` environment variable (execution consent).
 For this explicitly approved mode, remove the environment's required reviewers
-and wait timer but retain its exact `dev` **branch** policy. The OIDC bootstrap
+and wait timer but retain its exact `main` **branch** policy. The OIDC bootstrap
 honors this environment flag on subsequent reconciliation. Disable the repository
 flag to stop automatic rollouts; restore environment reviewers for manual-only
 operation. Do not enable this training-only mode for production.
@@ -501,10 +501,10 @@ explicitly; usernames and tokens from different pairs are never combined.
 Credentials are passed through stdin and removed from Docker after use. The
 workflows never fetch credentials from a workstation or attempt anonymous pulls.
 
-The protected Drowsy Dragon CI job runs on pushes to `dev` and is enabled by
-default for manual runs on `dev`. Clear the `drowsy-dragon` checkbox to skip it
+The protected Drowsy Dragon CI job runs on pushes to `main` and is enabled by
+default for manual runs on `main`. Clear the `drowsy-dragon` checkbox to skip it
 for an individual manual run. Pull requests and other branches do not run this
-dev-only job. The image-only environment does not require review; ordinary `dev`
+training-only job. The image-only environment does not require review; ordinary `main`
 pushes build without manual approval.
 It needs authenticated access to its pinned DHI image, not Azure credentials.
 Shared organization secrets remain subject to their repository-access policy;

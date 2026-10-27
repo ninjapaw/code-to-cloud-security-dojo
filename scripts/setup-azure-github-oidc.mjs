@@ -200,7 +200,7 @@ function ensureEnvironment(repository) {
     ],
     { allowFailure: true },
   );
-  if (!(policies?.branch_policies || []).some((item) => item.name === "dev"))
+  if (!(policies?.branch_policies || []).some((item) => item.name === "main"))
     applyStep("bind deployment environment to dev", () => {
       gh(
         [
@@ -211,7 +211,7 @@ function ensureEnvironment(repository) {
           "--input",
           "-",
         ],
-        { input: JSON.stringify({ name: "dev", type: "branch" }) },
+        { input: JSON.stringify({ name: "main", type: "branch" }) },
       );
     });
   else status("ok", "deployment environment is bound to dev");
